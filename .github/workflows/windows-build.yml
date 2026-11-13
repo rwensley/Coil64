@@ -1,0 +1,71 @@
+# KE9ESU fork of Coil64 - automated Windows build (Qt 5.15.2 / MinGW 8.1, 64-bit)
+# Coil64 (c) Valery Kustarev, GPL-3.0-or-later. This workflow only builds and packages; it does not publish releases.
+name: Windows build
+
+on:
+  push:
+    branches: [ ke9esu, 'ke9esu-*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    env:
+      PKG: Coil64-KE9ESU-win64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 5.15.2 + MinGW 8.1
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: windows
+          target: desktop
+          arch: win64_mingw81
+          tools: 'tools_mingw,qt.tools.win64_mingw810'
+          cache: true
+
+      - name: Put Qt's MinGW first on PATH
+        shell: pwsh
+        run: |
+          $mingw = Join-Path $env:IQTA_TOOLS 'mingw810_64\bin'
+          if (-not (Test-Path $mingw)) { Get-ChildItem $env:IQTA_TOOLS; throw "MinGW not found at $mingw" }
+          $mingw | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build (qmake + mingw32-make release)
+        shell: cmd
+        run: |
+          where g++
+          g++ --version
+          qmake -v
+          mkdir build
+          cd build
+          qmake ..\Coil64.pro CONFIG+=release CONFIG-=debug_and_release
+          mingw32-make -j4
+
+      - name: Package (windeployqt + Data folder)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter Coil64.exe | Select-Object -First 1
+          if (-not $exe) { throw "Coil64.exe not found" }
+          New-Item -ItemType Directory -Force $env:PKG | Out-Null
+          Copy-Item $exe.FullName "$env:PKG\"
+          windeployqt --release --compiler-runtime --no-translations "$env:PKG\Coil64.exe"
+          # Coil64 reads the Fair-Rite material curves from <exe dir>\Data at run time
+          Copy-Item -Recurse data "$env:PKG\Data"
+          Copy-Item LICENSE, README.md, README_KE9ESU.md "$env:PKG\"
+          Copy-Item -Recurse docs "$env:PKG\docs"
+          Compress-Archive -Path "$env:PKG\*" -DestinationPath "$env:PKG.zip" -Force
+          Get-ChildItem $env:PKG | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coil64-KE9ESU-win64
+          path: Coil64-KE9ESU-win64/
+          if-no-files-found: error
+          retention-days: 30
