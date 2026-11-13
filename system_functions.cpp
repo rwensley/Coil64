@@ -599,6 +599,16 @@ QString formattedOutput(_OptionStruct *mOpt, QString header, QString value, QStr
         output = header + " <span>" + value + "</span> " + footer;
     return output;
 }
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// KE9ESU fork: returns the unit caption shown next to (and in the results after) any wire-diameter value.
+/// "AWG" when the Preferences wire setting is AWG, otherwise the user's selected length unit (mm, cm, in, mil ...).
+/// Every wire-diameter label must use this so the caption can never disagree with how the value is interpreted.
+QString wireDiameterUnit(const _OptionStruct *mOpt)
+{
+    if (mOpt->isAWG)
+        return QCoreApplication::translate("Context", "AWG");
+    return QCoreApplication::translate("Context", mOpt->ssLengthMeasureUnit.toUtf8());
+}
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// functions to create tab "libraries" of the About Window
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

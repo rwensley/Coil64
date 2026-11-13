@@ -245,6 +245,7 @@ private slots:
     void on_actionCoupled_coils_triggered();
 
 private:
+    void setWireDiameterField(QLabel *unitLabel, QLineEdit *edit); // KE9ESU: unit caption + validator follow Preferences
     Ui::MainWindow *mui;
     QNetworkAccessManager *net_manager;
     QDoubleValidator *dv;
