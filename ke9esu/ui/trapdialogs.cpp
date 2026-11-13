@@ -64,10 +64,10 @@ void TrapTables::set(const std::vector<Check> &ck, const std::vector<TrapBand> &
     m_bands->setRowCount((int)bs.size()); QStringList blk; int ind = 0, cap = 0;
     for (int r = 0; r < (int)bs.size(); r++) {
         const TrapBand &b = bs[r];
-        QString eq = b.near ? S("blocks (near resonance)") : b.x > 0 ? f(b.eqUH, 2) + S(" µH") : f(b.eqPF, 1) + " pF";
-        QStringList v = {b.band, f(b.fMHz, 3), b.near ? S("≈ ∞") : rnd(b.x), b.kind, eq};
-        for (int c = 0; c < 5; c++) { QTableWidgetItem *it = new QTableWidgetItem(v[c]); if (b.near) it->setForeground(sevColor("fail")); m_bands->setItem(r, c, it); }
-        if (b.near) blk << b.band; else if (b.x > 0) ind++; else cap++;
+        QString eq = b.nearRes ? S("blocks (near resonance)") : b.x > 0 ? f(b.eqUH, 2) + S(" µH") : f(b.eqPF, 1) + " pF";
+        QStringList v = {b.band, f(b.fMHz, 3), b.nearRes ? S("≈ ∞") : rnd(b.x), b.kind, eq};
+        for (int c = 0; c < 5; c++) { QTableWidgetItem *it = new QTableWidgetItem(v[c]); if (b.nearRes) it->setForeground(sevColor("fail")); m_bands->setItem(r, c, it); }
+        if (b.nearRes) blk << b.band; else if (b.x > 0) ind++; else cap++;
     }
     m_rb->setSummary(QString("%1 bands · <span style='color:%2'>blocks %3</span> · %4 inductive · %5 capacitive").arg(bs.size()).arg(sevColor("fail").name(), blk.isEmpty() ? "none" : blk.join(", ")).arg(ind).arg(cap));
     m_steps->setText(stepsHtml(steps)); m_rs->setSummary(QString("%1 steps").arg(steps.size()));
@@ -79,7 +79,7 @@ void TrapTables::set(const std::vector<Check> &ck, const std::vector<TrapBand> &
 static QString bandsSheet(const std::vector<TrapBand> &bs)
 {
     QString h = "<table class='t' cellspacing='0'><tr><th>Band</th><th>MHz</th><th>X</th><th>Acts like</th></tr>";
-    for (const TrapBand &b : bs) h += "<tr><td>" + b.band + "</td><td class='n'>" + f(b.fMHz, 3) + "</td><td class='n'>" + (b.near ? S("≈ ∞") : rnd(b.x)) + "</td><td>" + esc(b.kind + (b.near ? QString() : b.x > 0 ? " " + f(b.eqUH, 2) + S(" µH") : " " + f(b.eqPF, 1) + " pF")) + "</td></tr>";
+    for (const TrapBand &b : bs) h += "<tr><td>" + b.band + "</td><td class='n'>" + f(b.fMHz, 3) + "</td><td class='n'>" + (b.nearRes ? S("≈ ∞") : rnd(b.x)) + "</td><td>" + esc(b.kind + (b.nearRes ? QString() : b.x > 0 ? " " + f(b.eqUH, 2) + S(" µH") : " " + f(b.eqPF, 1) + " pF")) + "</td></tr>";
     return h + "</table>";
 }
 static QString trapSheet(const QString &title, const QList<QPair<QString, QString>> &rows, const std::vector<Check> &checks, const QStringList &steps, const std::vector<Part> &parts, const std::vector<TrapBand> &bs)

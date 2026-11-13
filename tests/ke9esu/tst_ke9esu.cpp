@@ -385,7 +385,7 @@ struct Diff {
     void bands(const QString &w, const QJsonArray &js, const std::vector<TrapBand> &b) {
         if (js.size() != (int)b.size()) { err(w + " bands count", QString::number(js.size()), QString::number(b.size())); return; }
         for (int i = 0; i < js.size(); i++) { QJsonArray a = js[i].toArray(); str(w + " band", a[0], b[i].band); num(w + " band f", a[1], b[i].fMHz); num(w + " band x " + b[i].band, a[2], b[i].x, 1e-7);
-            str(w + " band kind", a[3], b[i].kind); num(w + " eqUH", a[4], b[i].eqUH, 1e-7); num(w + " eqPF", a[5], b[i].eqPF, 1e-7); n++; if (a[6].toBool() != b[i].near) err(w + " near " + b[i].band, a[6].toBool() ? "true" : "false", b[i].near ? "true" : "false"); }
+            str(w + " band kind", a[3], b[i].kind); num(w + " eqUH", a[4], b[i].eqUH, 1e-7); num(w + " eqPF", a[5], b[i].eqPF, 1e-7); n++; if (a[6].toBool() != b[i].nearRes) err(w + " near " + b[i].band, a[6].toBool() ? "true" : "false", b[i].nearRes ? "true" : "false"); }
     }
     void done() { if (!errs.isEmpty()) throw Fail((QString::number(errs.size()) + " mismatches (of " + QString::number(n) + " values):\n      " + errs.join("\n      ")).toStdString()); std::printf("      %d values identical\n", n); }
 };

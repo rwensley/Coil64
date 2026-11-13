@@ -228,7 +228,7 @@ std::vector<TrapBand> trapReactanceAtBands(double L_uH, double C_pF, double f0MH
     for (const Band &b : bands()) {
         double f = (b.lo + b.hi) / 2, w = 2 * PI * f * 1e6, x = w * L_uH * 1e-6 / (1 - w * w * L_uH * 1e-6 * C_pF * 1e-12);
         TrapBand r{b.id, f, x, x > 0 ? "inductive" : "capacitive", x > 0 ? x / w * 1e6 : NaN, x < 0 ? -1e12 / (w * x) : NaN, std::fabs(f / f0MHz - 1) < 0.06};
-        if (!(skipSame && r.near)) out.push_back(r);
+        if (!(skipSame && r.nearRes)) out.push_back(r);
     }
     return out;
 }

@@ -18,7 +18,7 @@ static const double C_LIGHT = 299.792458;   // m/us (=> MHz*m)
 struct Coax { QString id, label; double z0, pfFt, vf, odIn, centerMM, shieldMM, vMaxRms; QString diel; bool foam, ccs; QString src; };
 struct PvcForm { QString id, label; double odIn; };
 struct CapType { QString id, label; double q; QString note; };
-struct TrapBand { QString band; double fMHz, x; QString kind; double eqUH, eqPF; bool near; };
+struct TrapBand { QString band; double fMHz, x; QString kind; double eqUH, eqPF; bool nearRes; };
 struct TrapVoltage { double rms, pk; };
 struct CoilQ { double q, esr, rac, rdc; };
 struct Helical { double uH, lwM; };
