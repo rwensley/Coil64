@@ -188,7 +188,7 @@ Wire size must stay user-selectable (EU users work in mm): the ported Balun/Unun
 must follow Coil64's Preferences exactly like the main window — AWG gauge with "AWG"/# when isAWG, otherwise wire
 diameter in the selected length unit — using `wireDiameterUnit()`, `converttoAWG()/convertfromAWG()` and
 `dwLengthMultiplier`; store all lengths internally in mm. Never hard-code AWG, mm or inches in a caption.
-Standalone HTML app v1.3.1 honours this: `BalunCore.setUnits({wire: "awg"|"mm"|"in", len: "mixed"|"mm"|"in"})`
+Standalone HTML app v1.3.1+ honours this: `BalunCore.setUnits({wire: "awg"|"mm"|"in", len: "mixed"|"mm"|"in"})`
 and the text helpers `wireLabel()`, `wireSize()`, `wireDiaMM()`, `mmTxt()`, `inchTxt()`, `lenDual()`, `dimsTxt()`,
 `dispUnit()` build every caption; inputs keep their native unit internally (mm, coax trap in inches) and are
 converted for display (ui.js `LEN_FIELDS`, `putVal()`, `fromDisp()`). In the C++ port these map 1:1 onto
@@ -310,3 +310,47 @@ Milestone 2b — standard-part combination: % tolerance and wiring diagrams (Ron
   Light/Dark ink-on-paper contrast and fit-without-upscale; every 4-part mixed R/C/L result draws.
 - Screenshots: `light|dark/16_combiner_series_R`, `17_combiner_mixed_R`, `18_combiner_parallel_C`,
   `19_combiner_mixed_L`, `24_combiner_large_text`, `drawings/combiner_net01…10.png`, `light/24_combiner_sheet.pdf`.
+
+Milestone 2c — low-side shunt capacitor and transformer frequency sweep (core v1.3.2; Ron: "What happened to the shunt
+capacitor, typically 100 pF 10 kV, across the low side of the transformer", then "do a frequency sweep … make the shunt
+cap variable")
+- Port of the standalone designer v1.3.2 (`core.js` → `balun_core.{h,cpp}`); golden file regenerated (383 designs incl.
+  the new `cap`, `capSug` and `sweep` blocks: points, readout, opt, load family, model text — byte-identical).
+- Inputs (`BalunInput`, saved in `F_BALUN`): `capMode` default | off | suggested | custom (default resolves per
+  topology: auto91 / efhw49 / efhw64 → suggested, ruthroff41 / ruthroff91 → off, chokes / Guanella → n/a), `capPF`,
+  `capRatingV` (CAP_RATINGS ladder, default 10 kV), `sweepPoints`, `sweepScale`, `sweepLoadMode`, `sweepLoad`,
+  `sweepLoadMin/Max`, `sweepLeadMM` and the advanced overrides `sweepK`, `sweepCsPF`, `sweepZ0`.
+- `compensationCap()` now also returns the needed voltage (5 × input peak at power and SWR), RMS current, kvar and the
+  rating check; checks: `cap` (FAIL if the rating is below the need), `capI` (CHECK above 2 A RMS), `capEffect`
+  (CHECK when the chosen C makes the worst-band SWR more than 10 % worse than none), `sweep` (NOTE/CHECK).
+- Sweep model (`transformerSweep`): Zin = C ∥ (jωL_lead + Zm ∥ Zser). Tapped autotransformers (9:1 auto, 49:1, 64:1):
+  lumped, Zser = jωL_leak + (R_L/n² ∥ C_s·n²), L_leak = (1 − k)·L_primary(µi), k = 0.99 (9:1 auto) / 0.95 (EFHW),
+  C_s = 2 pF high-side stray (fitted). Ruthroff: bootstrap transmission lines (Z0 75 Ω twisted / 50 Ω enamel,
+  VF 0.7, length = turns × turn length). Zm from the core's µ′/µ″ at each frequency. SO-239 wiring 1 nH/mm (25 mm).
+  Efficiency = P_load / (P_load + P_core). `optimizeCap` scans 0–330 pF over band low/centre/high points: minimum
+  worst SWR, ties → lowest mean.
+- Validation (tests): 49:1 2:14 on FT240-43, 40–10 m: SWR 1.30–1.53 with the suggested 100 pF, 2.42 worst (10 m)
+  without, optimum 80 pF (1.50) — in line with DG1JAN / G4AON / HamPost measurements (≈ 1.3–1.5 with 100 pF, ≈ 2.3
+  at 10 m without) and ≈ 80 % efficiency on 40 m. KE9ESU 9:1 Ruthroff: 1.04–1.22 to 10 m, 1.52 at 6 m (no C).
+- UI: Low-side shunt C row (mode + pF) and Voltage rating with the computed minimum in the transformer box ("not
+  applicable" note for chokes); cap card; "Frequency sweep" tab between the winding diagram and the impedance plot
+  (slider 0–330 pF live, scale, steps, load / family / range, SO-239 wiring, Optimize C, CSV…, PNG…, three-panel plot
+  with ham bands and hover readout, band-centre table, model note); cap strip under the winding (SO-239 flange,
+  centre pin, red leads, capacitor, "C = 100 pF · 10 kV"); parts line "100 pF capacitor rated 10 kV (needs ≥ 1 kV),
+  doorknob / HV ceramic (N4700, C0G) or silver mica — low-side shunt from SO-239 centre to shell"; build step; build
+  sheet rows + sweep plot; Use in… "Low-side shunt C → LC circuit / combiner" and "Sweep-optimum shunt C → combiner".
+- Combiner dark-mode selected row (`m2b/windows/dark/17_combiner_mixed_R.png`): the selected row is tall (diagram
+  column) and its text was vertically centred, so after `scrollToItem` the text sat outside the visible part of the
+  row; also the sheet had no `::item:selected` rule. Fixed: row text top-aligned, detail sized before scrolling, and
+  `QTableView::item:selected { background: accent; color: on-accent }` (active and inactive) for every RF window.
+- Bold primary buttons (Accept, Find combinations, Optimize C) reserve their bold text width in every RF window.
+- Limitations: lumped / lossless-line model; no wire, dielectric or line loss; no common-mode / imbalance, enclosure,
+  counterpoise or feedline effects; k and C_s are fitted, not measured; 6 m figures are rough; 3- and 4-turn primaries
+  (49:1 3:21, 64:1) show high 10 m SWR because leakage grows with N² — real builds often do better with careful
+  winding; calibrate `sweepK` / `sweepCsPF` against an analyser measurement.
+- Tests 94 (88 + 6): defaults per topology, voltage rating / FAIL, sweep shape and band readout, EFHW validation,
+  Ruthroff + load-range family, normalise + JSON round trip; golden comparison of cap / capSug / sweep.
+- Screenshots: `light|dark/20c_balun_auto91_cap_diagram`, `20d_…_winding_tab`, `25_balun_efhw49_cap`,
+  `25d_…_winding_tab`, `26_balun_sweep_efhw49`, `26d_…`, `27_balun_sweep_auto91`, `28_balun_sweep_load_range`,
+  `29_balun_sweep_optimized`, `29d_…`, large-text 25b / 26b, `17_combiner_mixed_R` (selected row);
+  `drawings/balun_winding_*.png`, `drawings/balun_sweep_efhw49.{png,csv}`.

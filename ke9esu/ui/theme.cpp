@@ -195,6 +195,8 @@ QHeaderView { background: @bg; }
 QHeaderView::section { background: @bg; color: @muted; border: none; border-bottom: 1px solid @line; border-right: 1px solid @grid; padding: 4px 6px; font-weight: bold; }
 QTableView { background: @panel; alternate-background-color: @bg; gridline-color: @grid; border: 1px solid @line; border-radius: 6px;
     selection-background-color: @accent; selection-color: @onaccent; }
+QTableView::item:selected { background: @accent; color: @onaccent; }
+QTableView::item:selected:!active { background: @accent; color: @onaccent; }
 QTableView QTableCornerButton::section { background: @bg; border: none; }
 QListView, QTreeView { background: @panel; border: 1px solid @line; border-radius: 6px; outline: 0; }
 QListView::item { padding: 2px; border-radius: 4px; }

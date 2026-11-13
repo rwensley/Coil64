@@ -9,7 +9,8 @@ static void rd(const QJsonObject &o, const char *k, double &v) { if (o.contains(
 static void rd(const QJsonObject &o, const char *k, QString &v) { if (o.contains(k) && !o.value(k).isNull()) { QJsonValue j = o.value(k); v = j.isString() ? j.toString() : QString::number(j.toDouble()); } }
 
 #define F_BALUN(X) X(topology) X(coreId) X(conductorId) X(stack) X(turns) X(zLow) X(powerW) X(vswr) X(fMinMHz) X(fMaxMHz) X(duty) X(dutyPercent) \
-    X(xlFactor) X(chokeTarget) X(cmPercent) X(leadMM) X(ambientC) X(csMode) X(csPF)
+    X(xlFactor) X(chokeTarget) X(cmPercent) X(leadMM) X(ambientC) X(csMode) X(csPF) \
+    X(capMode) X(capPF) X(capRatingV) X(sweepPoints) X(sweepScale) X(sweepLoadMode) X(sweepLoad) X(sweepLoadMin) X(sweepLoadMax) X(sweepLeadMM) X(sweepK) X(sweepCsPF) X(sweepZ0)
 #define F_COAX(X) X(fMHz) X(coaxId) X(formId) X(formOdIn) X(spacingIn) X(leadIn) X(trimIn) X(model) X(powerW) X(zEnd) X(duty) X(dutyPercent) \
     X(customPfFt) X(customVf) X(customOdIn) X(customZ0)
 #define F_LC(X) X(fMHz) X(mode) X(xOhm) X(lUH) X(cPF) X(snap) X(coreType) X(formId) X(formDiaMM) X(wireId) X(pitchMM) X(coreId) X(stack) X(powerW) \

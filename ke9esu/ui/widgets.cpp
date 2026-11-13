@@ -438,7 +438,9 @@ void Ke9esuDialog::tameCombos()
 }
 void Ke9esuDialog::fitSplitters()
 {
-    if (m_acc) { QFont bf = m_acc->font(); bf.setBold(true); m_acc->setMinimumWidth(QFontMetrics(bf).horizontalAdvance(m_acc->text()) + QFontMetrics(bf).height() * 2 + 12); }
+    // primary (bold) buttons: the stylesheet bolds them after sizeHint, so reserve the bold text width (all KE9ESU windows)
+    for (QPushButton *pb : findChildren<QPushButton *>()) if (pb->objectName() == "ke9esuPrimary") { QFont bf = pb->font(); bf.setBold(true);
+        pb->setMinimumWidth(QFontMetrics(bf).horizontalAdvance(pb->text()) + QFontMetrics(bf).height() * 2 + 12); }
     // left input pane gets what its form needs (labels never truncated), capped at 55 % so results stay usable
     for (QSplitter *sp : findChildren<QSplitter *>()) {
         if (sp->orientation() != Qt::Horizontal || sp->count() < 2) continue;

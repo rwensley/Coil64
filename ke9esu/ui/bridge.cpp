@@ -5,6 +5,7 @@
 #include "project.h"
 #include "widgets.h"
 #include "balundialog.h"
+#include "diagram.h"
 #include "eflwdialog.h"
 #include "trapdialogs.h"
 #include "coredbdialog.h"
@@ -399,7 +400,22 @@ void Bridge::screenshots(const QString &dir)
                 c->loadState(keep);
             }
             if (BalunDialog *bd = qobject_cast<BalunDialog *>(d)) {
-                bd->applyPreset("ke9esu-auto91"); g2(bd, "20_balun_auto91"); bd->applyPreset("ke9esu-choke"); g2(bd, "21_balun_choke"); bd->applyPreset("ke9esu");
+                bd->applyPreset("ke9esu-auto91"); g2(bd, "20_balun_auto91"); bd->applyPreset("ke9esu-choke"); g2(bd, "21_balun_choke");
+                // M2c: low-side shunt capacitor drawn across the SO-239, and the frequency sweep tab
+                bd->applyPreset("ke9esu-auto91"); bd->showSweepTab(false); g2(bd, "20c_balun_auto91_cap_diagram"); g2(bd->tabsWidget(), "20d_balun_auto91_winding_tab");
+                bd->applyPreset("efhw49-40"); bd->showSweepTab(false); g2(bd, "25_balun_efhw49_cap"); g2(bd->tabsWidget(), "25d_balun_efhw49_winding_tab");
+                bd->showSweepTab(); g2(bd, "26_balun_sweep_efhw49"); g2(bd->tabsWidget(), "26d_balun_sweep_tab_efhw49");
+                bd->applyPreset("ke9esu-auto91"); bd->showSweepTab(); g2(bd, "27_balun_sweep_auto91");
+                { QJsonObject st = bd->saveState(); QJsonObject in = st.value("input").toObject(); in.insert("sweepLoadMode", "range"); in.insert("topology", "efhw49"); in.insert("coreId", "FT240-43"); in.insert("stack", 1);
+                  in.insert("conductorId", "awg18e"); in.insert("turns", 2); in.insert("fMinMHz", 7); in.insert("fMaxMHz", 29.7); in.insert("capMode", "suggested"); st.insert("input", in); bd->loadState(st);
+                  bd->showSweepTab(); g2(bd, "28_balun_sweep_load_range");
+                  bd->optimizeCap(); g2(bd, "29_balun_sweep_optimized"); g2(bd->tabsWidget(), "29d_balun_sweep_tab_optimized");
+                  const DesignResult &r = bd->result(); qInfo("KE9ESU shots: sweep %s opt %g pF worst %.2f (off %.2f), cap %g pF", qPrintable(r.topology.id), r.sweep.opt.pF, r.sweep.opt.maxSwr, r.sweep.opt.offMaxSwr, r.hasCompCap ? r.compCap.pF : 0.0);
+                  if (style == StyleKe9esuLight) { QString dd = dir + "/drawings"; QDir().mkpath(dd); bd->exportSweepCsv(dd + "/balun_sweep_efhw49.csv"); bd->exportSweepPng(dd + "/balun_sweep_efhw49.png"); } }
+                for (int k = 0; k < 4; k++) stepFont(+1);
+                bd->resize(1280, 820); bd->applyPreset("efhw49-40"); bd->showSweepTab(); g2(bd, "26b_balun_sweep_large_text"); bd->showSweepTab(false); g2(bd, "25b_balun_efhw49_cap_large_text"); stepFont(0);
+                if (style == StyleKe9esuLight) { QString dd = dir + "/drawings"; for (const char *id : {"ke9esu-auto91", "efhw49-40"}) { bd->applyPreset(id); renderWinding(bd->result()).save(dd + "/balun_winding_" + QString(id) + ".png"); } }
+                bd->showSweepTab(false); bd->applyPreset("ke9esu");
                 bd->resize(1024, 700); g2(bd, "22_balun_1024px");
                 for (int k = 0; k < 4; k++) stepFont(+1);
                 bd->resize(1280, 820); g2(bd, "23_balun_large_text"); stepFont(0); bd->resize(1280, 820);

@@ -1,4 +1,4 @@
-// KE9ESU fork of Coil64 (GPL-3.0-or-later): dump reference outputs of the KE9ESU web app's core.js (v1.3.1) for the
+// KE9ESU fork of Coil64 (GPL-3.0-or-later): dump reference outputs of the KE9ESU web app's core.js (v1.3.2) for the
 // C++ port's differential test (tests/ke9esu/golden.json). Run: node ke9esu/tools/gen_golden.js /path/to/core.js
 const C = require(process.argv[2] || "/workspace/ke9esu_balun_designer/core.js");
 const out = { version: C.VERSION, design: [], coax: [], lc: [], eflw: [], units: [] };
@@ -9,7 +9,19 @@ function designCase(inp) {
     zr: d.zAtFmin.r, zx: d.zAtFmin.x, lossPeakW: d.lossPeakW, lossAvgW: d.lossAvgW, effPct: d.efficiencyPct, effWorstPct: d.efficiencyWorstPct, lossDensity: d.lossDensity_mWcm3,
     tempRiseC: d.tempRiseC, coreTempC: d.coreTempC, stray: d.stray_pF, passes: d.passes, turnLen: d.turnLengthMM, vHighRms: d.vHighRms, lFullUH: d.lFullUH,
     compCap: d.compCap ? d.compCap.pF : null, perFreq: d.perFreq.map(p => [p.fMHz, p.r, p.x, p.z, p.bPk_mT, p.bHeat_G, p.heatLimit_G, p.lossPeakW, p.lossMatchedW]),
-    wires: d.wires.map(w => [w.name, w.turns, w.lengthMM]), ...txt(d) };
+    wires: d.wires.map(w => [w.name, w.turns, w.lengthMM]), ...txt(d),
+    cap: d.compCap ? [d.compCap.mode, d.compCap.pF, d.compCap.suggestedPF, d.compCap.pFcalc, d.compCap.rangePF[0], d.compCap.rangePF[1], d.compCap.vPeak, d.compCap.needV, d.compCap.minRatingV, d.compCap.ratingV, d.compCap.ratingOk, d.compCap.iRmsA, d.compCap.kvar, d.compCap.iAtMHz] : null,
+    capSug: d.capSuggestion ? [d.capSuggestion.pF, d.capSuggestion.pFcalc, d.capSuggestion.rangePF[0], d.capSuggestion.rangePF[1], d.capSuggestion.vPeak, d.capSuggestion.needV, d.capSuggestion.ratingV] : null,
+    sweep: d.sweep ? sweepCase(d.sweep) : null };
+}
+// v1.3.2 sweep: model, every 10th point (and the last), load curves every 25th point, band SWR, readouts, optimizer
+const P = p => [p.fMHz, p.r, p.x, p.z, p.swr, p.rlDb, p.effPct, p.mismatchDb];
+function sweepCase(s) {
+  const m = s.model, sub = (a, k) => a.map((v, i) => [i, v]).filter(([i]) => i % k === 0 || i === a.length - 1);
+  return { model: [m.kind, m.lLowUH, m.leadNH, m.ratio, m.loadOhm, m.z0, m.k, m.leakNH, m.csHighPF, m.csRefPF, m.lineZ0, m.lineMM, m.tauNs == null ? 0 : m.tauNs, m.lines],
+    capPF: s.capPF, n: s.points.length, pts: sub(s.points, 10).map(([i, p]) => [i].concat(P(p))), loads: s.loads.map(l => [l.ohm, sub(l.swr, 25)]),
+    band: s.band ? [s.band.maxSwr, s.band.meanSwr, s.band.atMHz] : null, readout: s.readout.map(p => [p.band].concat(P(p))),
+    opt: [s.opt.pF, s.opt.maxSwr, s.opt.meanSwr, s.opt.atMHz, s.opt.stdPF, s.opt.offMaxSwr, s.opt.offMeanSwr, s.opt.points] };
 }
 const tops = Object.keys(C.TOPOLOGIES);
 const coreIds = ["FT240-43", "FT140-43", "2.4in-31", "T200-2", "A:T-200-2", "A:FT-240-43", "FT82-61", "2643251002", "A:FT-140-77", "A:T-106-6"];
@@ -20,6 +32,13 @@ out.design.push(designCase({ topology: "choke11", coreId: "2.4in-31", conductorI
 out.design.push(designCase({ topology: "choke11", coreId: "2.4in-31", conductorId: "rg400", csMode: "manual", csPF: 3.3, turns: 12, cmPercent: 20 }));
 out.design.push(designCase({ topology: "guanella41", coreId: "FT240-61", conductorId: "awg14t", csMode: "none", duty: "cw", vswr: 5, ambientC: 45, leadMM: 250 }));
 out.design.push(designCase({ topology: "efhw64", coreId: "FT240-43", turns: 2, xlFactor: 8, zLow: 75, powerW: 500, duty: "custom", dutyPercent: 66, fMinMHz: 3.5, fMaxMHz: 29.7 }));
+// v1.3.2: shunt capacitor modes / ratings and sweep options
+for (const t of ["ruthroff41", "ruthroff91", "auto91", "efhw49", "efhw64"]) {
+  out.design.push(designCase({ topology: t, coreId: "FT240-43", conductorId: "awg18e", capMode: "custom", capPF: 47.5, capRatingV: 1000, powerW: 1500, vswr: 3, fMinMHz: 3.5, fMaxMHz: 29.7, sweepPoints: 51, sweepScale: "lin" }));
+  out.design.push(designCase({ topology: t, coreId: "FT140-43", conductorId: "awg16t", capMode: "off", sweepLoadMode: "range", sweepLoadMin: 50, sweepLoadMax: 3000, sweepPoints: 101 }));
+  out.design.push(designCase({ topology: t, coreId: "2.4in-31", conductorId: "awg14t", capMode: "suggested", capRatingV: 7500, sweepLoad: 600, sweepLeadMM: 60, sweepK: 0.97, sweepCsPF: 4, sweepZ0: 100, zLow: 75, fMinMHz: 7, fMaxMHz: 14.35 }));
+  out.design.push(designCase({ topology: t, coreId: "T200-2", conductorId: "awg16t", capMode: "bogus", capPF: 0, fMinMHz: 50, fMaxMHz: 50, sweepPoints: 3 }));
+}
 const coaxIds = C.COAX.map(c => c.id).concat(["custom"]);
 for (const id of coaxIds) for (const f of [1.85, 3.75, 7.05, 14.175, 28.85]) for (const model of ["lumped", "stub"]) {
   const inp = { fMHz: f, coaxId: id, formOdIn: f < 5 ? 3.5 : 2.375, model, spacingIn: f > 20 ? 0.1 : 0, powerW: 100 + f, zEnd: 2500 };

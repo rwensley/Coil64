@@ -1,4 +1,4 @@
-/* trap_core.h - KE9ESU coax-trap and LC-trap designer core, C++ port of the trap section of core.js v1.3.1.
+/* trap_core.h - KE9ESU coax-trap and LC-trap designer core, C++ port of the trap section of core.js v1.3.2.
    Coax traps: VE6YP / W4ULD / K7MEM lumped model with the W8JI open-stub correction.
    LC traps: air-core coil maths ported from Coil64 (resolves.cpp HeliCoilS - R. Weaver helical-filament inductance;
    bessel.cpp + resolve_srf_cs.cpp - D. W. Knight self-capacitance and SRF; resolve_q.cpp solve_Qr - Arnold tables and

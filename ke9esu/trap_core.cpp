@@ -1,4 +1,4 @@
-/* trap_core.cpp - KE9ESU coax-trap and LC-trap core, C++ port of core.js v1.3.1 (see trap_core.h).
+/* trap_core.cpp - KE9ESU coax-trap and LC-trap core, C++ port of core.js v1.3.2 (see trap_core.h).
    Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. Coil-maths ports: Coil64 (C) Valery Kustarev, GPL-3.0-or-later. */
 #include "trap_core.h"
 #include <QRegularExpression>

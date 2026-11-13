@@ -1,5 +1,5 @@
 /* tst_ke9esu.cpp - KE9ESU fork of Coil64: tests for the RF transformer / trap / long-wire / component-combiner cores.
-   1) every test of the KE9ESU web app's test.js (v1.3.1) and the Component Combiner's test.js, ported with the same
+   1) every test of the KE9ESU web app's test.js (v1.3.2) and the Component Combiner's test.js, ported with the same
       published reference values (G4AON, Fair-Rite, K9YC, DG1JAN, G3TXQ, Amidon, K7MEM, VE6YP, W4ULD, W8JI, Cromwell ...);
    2) a differential "golden" test: golden.json / golden_cc.json were produced by the JavaScript originals
       (ke9esu/tools/gen_golden*.js) and every number, check, step and parts-list text must match the C++ port.
@@ -214,8 +214,65 @@ static void portedDesignerTests()
         REQ1(near(d.vHighRms, 3 * std::sqrt(100.0 * 50) * mismatchFactor(3), 1e-9));
         bool tap = false, shell = false, tri = false; for (auto &s : d.steps) { tap |= s.contains("Tap at turn"); shell |= s.contains("SO-239 shell"); tri |= s.contains("trifilar bundle"); }
         REQ1(tap && shell && !tri);
-        for (const char *id : {"auto", "leak", "split", "comp"}) { const Check *c = findCheck(d.checks, id); REQ(c && c->status == "info", id); }
-        REQ1(!d.hasCompCap);
+        for (const char *id : {"auto", "leak", "split"}) { const Check *c = findCheck(d.checks, id); REQ(c && c->status == "info", id); }
+        REQ1(d.hasCompCap && d.compCap.mode == "suggested" && d.compCap.pF == 100);   // v1.3.2: low-side shunt C on by default for the 9:1 auto
+        bool capStep = false; for (auto &s : d.steps) capStep |= s.contains("SO-239 centre pin to the SO-239 shell"); REQ1(capStep);
+    });
+    /* ---- v1.3.2: low-side shunt capacitor and transformer frequency sweep ---- */
+    auto efhw = [] { BalunInput i; i.topology = "efhw49"; i.coreId = "FT240-43"; i.stack = 1; i.conductorId = "awg18e"; i.turns = 2; i.fMinMHz = 7; i.fMaxMHz = 29.7; i.powerW = 100; i.vswr = 2; i.duty = "ssb"; return i; };
+    t("shunt C: per-topology defaults (on for tapped autos, off for Ruthroff, n/a for chokes), custom/off/0 pF", [&] {
+        REQ1(CAP_MODES == QStringList({"off", "suggested", "custom"}));
+        for (auto pr : std::vector<std::pair<const char *, const char *>>{{"auto91", "suggested"}, {"efhw49", "suggested"}, {"efhw64", "suggested"}, {"ruthroff91", "off"}, {"ruthroff41", "off"}, {"choke11", "na"}, {"guanella41", "na"}}) REQ(defaultCapMode(pr.first) == pr.second, pr.first);
+        for (const char *top : {"auto91", "efhw49", "efhw64"}) { BalunInput i = efhw(); i.topology = top; i.turns = NaN; DesignResult d = design(i); REQ(d.hasCompCap && d.compCap.mode == "suggested", top); }
+        for (const char *top : {"ruthroff41", "ruthroff91"}) { BalunInput i = efhw(); i.topology = top; i.turns = NaN; DesignResult d = design(i); const Check *c = findCheck(d.checks, "cap"); REQ(!d.hasCompCap && c && c->status == "info" && d.hasSweep, top); }
+        for (const char *top : {"choke11", "guanella41"}) { BalunInput i; i.topology = top; DesignResult d = design(i); REQ(!d.hasCompCap && !d.hasSweep && !d.hasCapSuggestion, top); }
+        BalunInput c = efhw(); c.capMode = "custom"; c.capPF = 150; REQ1(design(c).compCap.pF == 150 && design(c).compCap.mode == "custom");
+        BalunInput o = efhw(); o.capMode = "off"; DesignResult od = design(o); REQ1(!od.hasCompCap); for (auto &p : od.parts) REQ1(!p.item.contains("pF capacitor"));
+        BalunInput z = efhw(); z.capMode = "custom"; z.capPF = 0; REQ1(!design(z).hasCompCap);
+    });
+    t("shunt C voltage: 7.5 kV and 10 kV on the ladder, default 10 kV, FAIL below the need, kV text, parts list", [&] {
+        for (double v : {500.0, 1000.0, 5000.0, 7500.0, 10000.0, 15000.0}) REQ1(std::find(CAP_RATINGS.begin(), CAP_RATINGS.end(), v) != CAP_RATINGS.end());
+        REQ1(kvTxt(10000) == "10 kV" && kvTxt(7500) == "7.5 kV" && kvTxt(500) == "500 V");
+        DesignResult d = design(efhw()); REQ1(d.compCap.ratingV == 10000 && d.compCap.ratingOk);
+        const Check *ck = findCheck(d.checks, "cap"); REQ1(ck && ck->status == "ok" && ck->text.contains("10 kV") && ck->text.contains(QString::fromUtf8("needs ≥")));
+        bool part = false; for (auto &p : d.parts) part |= p.item.startsWith(QString::fromUtf8("100 pF capacitor rated 10 kV (needs ≥")); REQ1(part);
+        BalunInput h = efhw(); h.powerW = 1500; h.vswr = 3; h.capRatingV = 1000; DesignResult hd = design(h);
+        const Check *f = findCheck(hd.checks, "cap"); REQ1(!hd.compCap.ratingOk && f && f->status == "fail");
+        REQ1(near(hd.compCap.needV, 5 * std::sqrt(2 * 1500.0 * 50) * mismatchFactor(3), 1e-9));
+    });
+    t("sweep: log/lin spacing, LF behaviour = Zm || R/n, shunt C pulls X capacitive, optimizer never worse than none", [&] {
+        BalunInput i = efhw(); i.sweepPoints = 51; DesignResult d = design(i); const Sweep &s = d.sweep;
+        REQ1(s.points.size() == 51 && near(s.points[0].fMHz, 7, 1e-9) && near(s.points[50].fMHz, 29.7, 1e-9));
+        REQ1(near(s.points[2].fMHz / s.points[1].fMHz, s.points[1].fMHz / s.points[0].fMHz, 1e-9));
+        BalunInput l = efhw(); l.sweepPoints = 11; l.sweepScale = "lin"; auto lp = design(l).sweep.points; REQ1(near(lp[2].fMHz - lp[1].fMHz, lp[1].fMHz - lp[0].fMHz, 1e-9));
+        REQ1(s.model.loadOhm == 2450 && s.model.kind == "lumped" && s.model.k == 0.95 && s.model.csHighPF == 2);
+        for (auto &p : s.points) REQ1(p.swr >= 1 && p.effPct > 0 && p.effPct <= 100 && p.rlDb > 0 && near(p.z, std::hypot(p.r, p.x), 1e-9));
+        SweepModel m = s.model; m.leakNH = 0; m.csRefPF = 0; m.leadNH = 0; const Core &core = *coreById("FT240-43");
+        SweepPoint ideal = sweepPoint(core, 2, 1, m, 14, 2450, 0); Impedance wz = windingImpedance(core, 2, 14e6, 1, 0);
+        double dr = wz.r + 50, dx = wz.x, nr = wz.r * 50, nx = wz.x * 50, dd = dr * dr + dx * dx;   // Zm*50/(Zm+50)
+        REQ1(near(ideal.r, (nr * dr + nx * dx) / dd, 1e-9) && near(ideal.x, (nx * dr - nr * dx) / dd, 1e-9));
+        REQ1(sweepPoint(core, 2, 1, m, 28, 2450, 100).x < sweepPoint(core, 2, 1, m, 28, 2450, 0).x);
+        CapOpt o = optimizeCap(core, 2, 1, s.model, 7, 29.7); REQ1(o.pF >= 0 && o.pF <= 330 && o.maxSwr <= o.offMaxSwr + 1e-9);
+    });
+    t("sweep validation: EFHW 2:14 FT240-43 into 2450 ohm ~ published builds (< 1.6:1 40-10 m with 100 pF, ~2.3:1 at 10 m without)", [&] {
+        const Sweep w = design(efhw()).sweep; BalunInput o = efhw(); o.capMode = "off"; const Sweep wo = design(o).sweep;
+        REQ(w.band.maxSwr < 1.6, n2s(w.band.maxSwr)); double ten = 0, eff40 = 0; for (auto &r : wo.readout) if (r.band == "10m") ten = r.swr; for (auto &r : w.readout) if (r.band == "40m") eff40 = r.effPct;
+        REQ(ten > 1.9 && ten < 2.8, n2s(ten)); REQ(wo.opt.pF >= 60 && wo.opt.pF <= 150, n2s(wo.opt.pF)); REQ(eff40 > 70 && eff40 < 95, n2s(eff40));
+    });
+    t("sweep: Ruthroff line model (4:1 flat into 200 ohm, KE9ESU 9:1 good on HF, shunt C flagged), load-range family", [&] {
+        BalunInput r4; r4.topology = "ruthroff41"; r4.coreId = "FT240-43"; r4.stack = 1; r4.conductorId = "awg14t"; r4.fMinMHz = 3.5; r4.fMaxMHz = 29.7; Sweep s4 = design(r4).sweep;
+        REQ1(s4.model.kind == "line" && s4.model.lines == 1 && s4.model.loadOhm == 200 && s4.band.maxSwr < 1.5);
+        BalunInput b; b.topology = "ruthroff91"; b.coreId = "FT240-43"; b.stack = 2; b.conductorId = "awg16t"; b.fMinMHz = 1.8; b.fMaxMHz = 29.7; b.sweepLoadMode = "range"; b.sweepLoadMin = 50; b.sweepLoadMax = 3000;
+        DesignResult d = design(b); REQ1(d.sweep.model.lines == 2 && d.sweep.band.maxSwr < 1.6);
+        REQ1(d.sweep.loads.size() == 6 && d.sweep.loads[0].ohm == 50 && d.sweep.loads[5].ohm == 3000 && d.sweep.loads[0].swr.size() == d.sweep.points.size());
+        BalunInput w = b; w.capMode = "custom"; w.capPF = 100; DesignResult dw = design(w); const Check *ce = findCheck(dw.checks, "capEffect");
+        REQ1(dw.sweep.band.maxSwr > d.sweep.band.maxSwr && ce && ce->status == "warn");
+    });
+    t("shunt C / sweep inputs normalise and survive the JSON round trip", [&] {
+        BalunInput i; i.topology = "efhw49"; i.capMode = "bogus"; i.capPF = -5; i.capRatingV = 1e9; i.sweepPoints = 3; i.sweepScale = "x"; i.sweepLoadMode = "y"; i.sweepK = 2; i.sweepZ0 = 5;
+        BalunInput n = normalize(i); REQ1(n.capMode == "suggested" && n.capPF == 0 && n.capRatingV == 50000 && n.sweepPoints == 11 && n.sweepScale == "log" && n.sweepLoadMode == "single" && n.sweepK == 1 && n.sweepZ0 == 10);
+        BalunInput a = efhw(); a.capMode = "custom"; a.capPF = 82; a.capRatingV = 7500; a.sweepLoad = 2200; a.sweepScale = "lin"; a.sweepLoadMode = "range";
+        BalunInput r = balunInputFromJson(toJson(a), BalunInput()); REQ1(r.capMode == "custom" && r.capPF == 82 && r.capRatingV == 7500 && r.sweepLoad == 2200 && r.sweepScale == "lin" && r.sweepLoadMode == "range" && std::isnan(r.sweepK));
     });
     t("9:1 autotransformer = Cromwell example (FT140-43: 8 turns 56.6 uH, 1245 ohm at 3.5 MHz; >= 4 tap turns)", [] {
         double L = inductanceUH(*coreById("FT140-43"), 8, 1, 0); REQ1(near(L, 56.6, 0.005)); REQ1(near(2 * PI * 3.5 * L, 1245, 0.005));
@@ -405,7 +462,7 @@ static QString inputTag(const QJsonObject &o) { return QString::fromUtf8(QJsonDo
 static void goldenTests(const QString &dir)
 {
     QJsonObject g;
-    t("golden: load golden.json (JS core v1.3.1 reference outputs)", [&] { g = loadJson(dir + "/golden.json"); REQ1(g["design"].toArray().size() > 300); });
+    t("golden: load golden.json (JS core v1.3.2 reference outputs)", [&] { g = loadJson(dir + "/golden.json"); REQ1(g["design"].toArray().size() > 300); });
     if (g.isEmpty()) return;
     t("golden: input defaults identical to the web app", [&] {
         Diff D; QJsonObject d = g["defaults"].toObject();
@@ -432,7 +489,7 @@ static void goldenTests(const QString &dir)
             D.str(w + " src", a[k++], c.src); D.str(w + " color", a[k++], c.color); D.str(w + " freq", a[k++], c.freq); D.str(w + " computed", a[k++], c.computed.join(",")); D.str(w + " webUrl", a[k++], c.webUrl); }
         D.done();
     });
-    t("golden: balun/unun designer - 363 designs, every number and text", [&] {
+    t("golden: balun/unun designer - 383 designs incl. shunt C and frequency sweep, every number and text", [&] {
         Diff D;
         for (auto v : g["design"].toArray()) {
             QJsonObject o = v.toObject(); BalunInput in = BI(o["input"].toObject()); DesignResult d = design(in); QString w = inputTag(o["input"].toObject());
@@ -443,6 +500,35 @@ static void goldenTests(const QString &dir)
             D.num(w + " lossDensity", o["lossDensity"], d.lossDensity_mWcm3, 1e-7); D.num(w + " tRise", o["tempRiseC"], d.tempRiseC, 1e-7); D.num(w + " tCore", o["coreTempC"], d.coreTempC, 1e-7);
             D.num(w + " stray", o["stray"], d.stray_pF); D.num(w + " passes", o["passes"], d.passes); D.num(w + " turnLen", o["turnLen"], d.turnLengthMM); D.num(w + " vHigh", o["vHighRms"], d.vHighRms);
             D.num(w + " lFull", o["lFullUH"], d.lFullUH); D.num(w + " compCap", o["compCap"], d.hasCompCap ? d.compCap.pF : NaN);
+            if (o["cap"].isNull() == d.hasCompCap) D.err(w + " cap present", o["cap"].isNull() ? "no" : "yes", d.hasCompCap ? "yes" : "no");
+            else if (d.hasCompCap) { QJsonArray a = o["cap"].toArray(); const CompCap &c = d.compCap; D.str(w + " cap mode", a[0], c.mode);
+                double vals[] = {c.pF, c.suggestedPF, c.pFcalc, c.rangePF[0], c.rangePF[1], c.vPeak, c.needV, c.minRatingV, c.ratingV};
+                for (int k = 0; k < 9; k++) D.num(w + " cap[" + QString::number(k + 1) + "]", a[k + 1], vals[k]);
+                D.n++; if (a[10].toBool() != c.ratingOk) D.err(w + " cap ratingOk", "", ""); D.num(w + " cap I", a[11], c.iRmsA); D.num(w + " cap kvar", a[12], c.kvar); D.num(w + " cap f", a[13], c.iAtMHz); }
+            if (o["capSug"].isNull() == d.hasCapSuggestion) D.err(w + " capSug present", "", "");
+            else if (d.hasCapSuggestion) { QJsonArray a = o["capSug"].toArray(); const CompCap &c = d.capSuggestion; double vals[] = {c.pF, c.pFcalc, c.rangePF[0], c.rangePF[1], c.vPeak, c.needV, c.ratingV};
+                for (int k = 0; k < 7; k++) D.num(w + " capSug[" + QString::number(k) + "]", a[k], vals[k]); }
+            if (o["sweep"].isNull() == d.hasSweep) D.err(w + " sweep present", "", "");
+            else if (d.hasSweep) {
+                QJsonObject so = o["sweep"].toObject(); const Sweep &S = d.sweep; const SweepModel &m = S.model; QJsonArray ma = so["model"].toArray();
+                D.str(w + " sweep kind", ma[0], m.kind);
+                double mv[] = {m.lLowUH, m.leadNH, m.ratio, m.loadOhm, m.z0, m.k, m.leakNH, m.csHighPF, m.csRefPF, m.lineZ0, m.lineMM, m.tauNs, (double)m.lines};
+                for (int k = 0; k < 13; k++) D.num(w + " sweep model[" + QString::number(k + 1) + "]", ma[k + 1], mv[k]);
+                D.num(w + " sweep capPF", so["capPF"], S.capPF); D.num(w + " sweep n", so["n"], (double)S.points.size());
+                auto P = [&](const QString &tag, const QJsonArray &a, int off, const SweepPoint &p) { double v[] = {p.fMHz, p.r, p.x, p.z, p.swr, p.rlDb, p.effPct, p.mismatchDb}; for (int k = 0; k < 8; k++) D.num(tag + "[" + QString::number(k) + "]", a[off + k], v[k], 1e-7); };
+                for (auto pv : so["pts"].toArray()) { QJsonArray a = pv.toArray(); int i = a[0].toInt(); if (i >= (int)S.points.size()) { D.err(w + " sweep pt", QString::number(i), "missing"); continue; } P(w + " sweep pt " + QString::number(i), a, 1, S.points[i]); }
+                QJsonArray la = so["loads"].toArray();
+                if (la.size() != (int)S.loads.size()) D.err(w + " sweep loads", QString::number(la.size()), QString::number(S.loads.size()));
+                else for (int j = 0; j < la.size(); j++) { QJsonArray a = la[j].toArray(); D.num(w + " load ohm", a[0], S.loads[j].ohm);
+                    for (auto pv : a[1].toArray()) { QJsonArray q = pv.toArray(); D.num(w + " load swr", q[1], S.loads[j].swr[q[0].toInt()], 1e-7); } }
+                if (so["band"].isNull() == S.band.has) D.err(w + " sweep band present", "", "");
+                else if (S.band.has) { QJsonArray b = so["band"].toArray(); D.num(w + " band max", b[0], S.band.maxSwr, 1e-7); D.num(w + " band mean", b[1], S.band.meanSwr, 1e-7); D.num(w + " band at", b[2], S.band.atMHz); }
+                QJsonArray ra = so["readout"].toArray();
+                if (ra.size() != (int)S.readout.size()) D.err(w + " readout", QString::number(ra.size()), QString::number(S.readout.size()));
+                else for (int j = 0; j < ra.size(); j++) { QJsonArray a = ra[j].toArray(); D.str(w + " readout band", a[0], S.readout[j].band); P(w + " readout " + S.readout[j].band, a, 1, S.readout[j]); }
+                QJsonArray oa = so["opt"].toArray(); const CapOpt &op = S.opt; double ov[] = {op.pF, op.maxSwr, op.meanSwr, op.atMHz, op.stdPF, op.offMaxSwr, op.offMeanSwr, (double)op.points};
+                for (int k = 0; k < 8; k++) D.num(w + " opt[" + QString::number(k) + "]", oa[k], ov[k], 1e-7);
+            }
             QJsonArray pf = o["perFreq"].toArray();
             if (pf.size() != (int)d.perFreq.size()) D.err(w + " perFreq count", QString::number(pf.size()), QString::number(d.perFreq.size()));
             else for (int i = 0; i < pf.size(); i++) { QJsonArray a = pf[i].toArray(); const PerFreq &p = d.perFreq[i]; double vals[] = {p.fMHz, p.r, p.x, p.z, p.bPk_mT, p.bHeat_G, p.heatLimit_G, p.lossPeakW, p.lossMatchedW};

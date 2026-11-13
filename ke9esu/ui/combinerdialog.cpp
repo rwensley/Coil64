@@ -249,7 +249,8 @@ void CombinerDialog::showResults()
         QStringList c = {x.expr, cc::fmt(x.value, 6, unit), cc::pctText(x.err), (in ? S("✓ ") : S("✗ ")) + cc::tolBadge(x.err, tol), QString::number(x.count), cc::partsSummary(x.parts, unit), QString()};
         QString tip = caption(x) + "\n" + spreadText(x);
         for (int k = 0; k < NCols; k++) { QTableWidgetItem *it = new QTableWidgetItem(c[k]); it->setToolTip(tip);
-            if (k == CValue || k == CErr || k == CCount) it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter); else it->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            // top-aligned: diagram rows can be tall, and a centred text could sit below the visible part of a partly scrolled row
+            if (k == CValue || k == CErr || k == CCount) it->setTextAlignment(Qt::AlignRight | Qt::AlignTop); else it->setTextAlignment(Qt::AlignLeft | Qt::AlignTop);
             if (k == CTol) { it->setForeground(sevColor(in ? "ok" : "warn")); QFont bf = it->font(); bf.setBold(true); it->setFont(bf); }
             else if (in) it->setForeground(sevColor("ok"));
             if (k == CDiagram) it->setData(Qt::UserRole, r);
@@ -290,7 +291,7 @@ void CombinerDialog::showDetail()
     m_detailHead->setText("<b>#" + QString::number(r + 1) + "  " + esc(x.expr) + "</b> &nbsp; · &nbsp;" + esc(des.join(", ")) + "<br><span style='color:" + theme().muted.name() + "'>" + esc(spreadText(x)) + "</span>");
     nv->set(x.tree, m_solType, caption(x));
 }
-void CombinerDialog::selectResult(int row) { if (row >= 0 && row < m_t->rowCount()) { m_t->selectRow(row); m_t->scrollToItem(m_t->item(row, 0)); showDetail(); sizeDetail(); } }
+void CombinerDialog::selectResult(int row) { if (row >= 0 && row < m_t->rowCount()) { m_t->selectRow(row); showDetail(); sizeDetail(); m_t->scrollToItem(m_t->item(row, 0), QAbstractItemView::EnsureVisible); } }
 /* inputs get what they need (at most 45 %), the selected diagram the height it needs at web-app scale (at most half of
    the rest), the results table the remainder */
 void CombinerDialog::sizeDetail()

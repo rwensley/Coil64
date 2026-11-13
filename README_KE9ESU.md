@@ -21,7 +21,7 @@ Branches
 2. **Integer division in the Arnold proximity table** (`resolve_q.cpp`, Table4_b): `4 / 19` evaluated to 0, making
    the proximity factor jump for long single-layer coils (ρ > 8). Now `4.0 / 19.0`, continuous with the table.
 
-Details: `docs/PORTING.md` → "Coil64 bug fixes in the fork". The standalone designer (v1.3.1) already follows selectable wire units (AWG / mm / in).
+Details: `docs/PORTING.md` → "Coil64 bug fixes in the fork". The standalone designer (v1.3.2) already follows selectable wire units (AWG / mm / in).
 
 ## Windows build
 `.github/workflows/windows-build.yml` builds `Coil64.exe` on every push to `ke9esu*` branches (or by hand via
@@ -36,9 +36,20 @@ The designer derives from *balun-unun-designer* by **Volodymyr Kopytsia** (githu
 MIT licence, kept in `docs/THIRD_PARTY-balun-unun-designer-MIT.txt`); the fork as a whole stays GPL-3.0-or-later.
 
 Menu **RF transformers & traps**:
-- **Balun / Unun designer** — 1:1, 4:1 Guanella / Ruthroff, 9:1 Ruthroff trifilar, 9:1 autotransformer, 49:1 / 64:1
-  (with compensation capacitor), 1:1 common-mode choke. Cards, per-frequency results, parts & cut lengths, build steps,
-  winding diagram and impedance plot, build sheet (print / PDF).
+- **Balun / Unun designer** — 1:1, 4:1 Guanella / Ruthroff, 9:1 Ruthroff trifilar, 9:1 autotransformer, 49:1 / 64:1,
+  1:1 common-mode choke. Cards, per-frequency results, parts & cut lengths, build steps, winding diagram, **frequency
+  sweep** and impedance plot, build sheet (print / PDF).
+  - **Low-side shunt capacitor** (v1.3.2) for every transformer: *Off / Suggested / Custom pF* and a voltage rating
+    (… 7.5 kV, **10 kV** default …) checked against 5 × the input peak at the design power and SWR (FAIL below it).
+    Defaults: Suggested (≈ 100 pF) on the 9:1 autotransformer and 49:1 / 64:1 EFHW; Off on the Ruthroff 4:1 / 9:1
+    line transformers (the sweep shows a shunt C only adds susceptance there — you can still turn it on, with a
+    warning if it makes the worst SWR worse); not applicable to chokes and Guanella baluns. Drawn across the SO-239
+    (centre → shell) under the winding, in the parts list, build steps, build sheet and project file; **Use in…**
+    sends it (or the sweep optimum) to the LC circuit or the standard-part combination.
+  - **Frequency sweep** tab: R, X, |Z|, SWR re 50 Ω, return loss and efficiency of the chosen design from the lowest
+    to the highest frequency (log / linear, 11–1001 steps), ham bands shaded, hover readout, a band-centre table, an
+    optional load-range family (e.g. 50…3000 Ω), a 0–330 pF shunt-C slider that updates live and **Optimize C**
+    (lowest worst-band SWR). Export CSV / PNG; on the build sheet; saved in the project.
 - **Long-wire analyzer** — band-by-band impedance tendency for an end-fed wire (default 124 ft, 160–6 m, 100 W), avoid
   zones and good lengths, recommended transformer (opens in the designer) and trap suggestions (open in the trap windows).
 - **Coax trap** and **LC trap** — turns / coil / capacitor, Q, SRF, voltage and current checks, reactance on the other bands.
@@ -65,7 +76,7 @@ session is restored automatically. Menu toggles: link core & wire live; share Co
 
 Tests: `tests/ke9esu` (console target, also run in CI on Windows and Linux) — the designer's and combiner's own test
 suites ported to C++, plus golden diffs of 150 000+ values against the JavaScript originals (byte-identical texts),
-plus theme / text-size settings tests (80 cases).
+plus theme / text-size settings tests (94 cases).
 
 ## Look & feel (Milestone 2)
 Coil64 now follows the KE9ESU web app's look; the drawings follow Coil64.

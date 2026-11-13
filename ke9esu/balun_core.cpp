@@ -1,4 +1,4 @@
-/* balun_core.cpp - KE9ESU Balun & Unun Designer core, C++ port of core.js v1.3.1. See balun_core.h for credits.
+/* balun_core.cpp - KE9ESU Balun & Unun Designer core, C++ port of core.js v1.3.2. See balun_core.h for credits.
    Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. */
 #include "balun_core.h"
 #include <QFile>
@@ -368,18 +368,138 @@ Fit windingFit(const Core &core, double condOd, double passes)
     int perLayer = (int)std::max(1.0, std::floor(PI * (core.idia - condOd) / condOd));
     return {perLayer, (int)std::ceil(passes / perLayer), passes * condOd * condOd / (core.idia * core.idia)};
 }
-CompCap compensationCap(double fTopMHz, double powerW, double vswr)
+CompCap compensationCap(double fTopMHz, double powerW, double vswr, double zLow)
 {
     double f = std::min(std::max(fTopMHz, 7.0), 30.0);
     double pF = 1e12 / (2 * PI * f * 1e6 * 55);
     pF = std::min(220.0, std::max(47.0, pF));
     const double stdv[] = {47, 56, 68, 82, 100, 120, 150, 180, 220}; double best = stdv[0];
     for (double s : stdv) if (std::fabs(s - pF) < std::fabs(best - pF)) best = s;
-    double vPk = std::sqrt(2 * powerW * 50) * mismatchFactor(vswr);
-    double need = 5 * vPk; const double ratings[] = {500, 1000, 2000, 3000, 5000, 15000}; double rating = ratings[5];
-    for (double r : ratings) if (r >= need) { rating = r; break; }
-    CompCap c; c.pF = best; c.pFcalc = pF; c.rangePF[0] = jsRound(best * 0.7); c.rangePF[1] = jsRound(best * 1.5); c.vPeak = vPk; c.ratingV = rating;
+    double vPk = std::sqrt(2 * powerW * (zLow ? zLow : 50)) * mismatchFactor(vswr);
+    double need = 5 * vPk, rating = CAP_RATINGS.back();
+    for (double r : CAP_RATINGS) if (r >= need) { rating = r; break; }
+    CompCap c; c.pF = best; c.pFcalc = pF; c.rangePF[0] = jsRound(best * 0.7); c.rangePF[1] = jsRound(best * 1.5); c.vPeak = vPk; c.needV = need; c.ratingV = rating;
     return c;
+}
+const std::vector<double> CAP_STD_PF = {10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100, 120, 150, 180, 220, 270, 330};
+const QStringList CAP_MODES = {"off", "suggested", "custom"};
+QString kvTxt(double v) { return v >= 1000 ? jsNum(v / 1000) + " kV" : rnd(v) + " V"; }
+/* Low-side shunt capacitor defaults (v1.3.2): Suggested for the tapped autotransformers (9:1 auto, 49:1, 64:1), Off for
+   the Ruthroff line transformers (the line model shows a shunt C only adds susceptance there), n/a for chokes/Guanella. */
+QString defaultCapMode(const QString &topId)
+{
+    if (topId == "ruthroff41" || topId == "ruthroff91") return "off";
+    if (topId == "auto91" || topId == "efhw49" || topId == "efhw64") return "suggested";
+    return "na";
+}
+double nearestStdPF(double v) { double b = CAP_STD_PF[0]; for (double s : CAP_STD_PF) if (std::fabs(s - v) < std::fabs(b - v)) b = s; return v <= 0 ? 0 : b; }
+
+/* ---- transformer frequency sweep (v1.3.2): see the model notes in core.js / PORTING.md */
+const double SWEEP_CS_PF = 2, LINE_VF = 0.7, LEAD_NH_PER_MM = 1.0;
+static const double C_LIGHT_MUS = 299.792458;   // m/us
+double sweepKDefault(const QString &topId) { if (topId == "auto91") return 0.99; if (topId == "efhw49" || topId == "efhw64") return 0.95; return 0.99; }
+namespace {
+struct Cx { double re, im; };
+inline Cx cadd(Cx a, Cx b) { return {a.re + b.re, a.im + b.im}; }
+inline Cx cmul(Cx a, Cx b) { return {a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re}; }
+inline Cx cdiv(Cx a, Cx b) { double d = b.re * b.re + b.im * b.im; return {(a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d}; }
+inline Cx cpar(Cx a, Cx b) { return cdiv(cmul(a, b), cadd(a, b)); }
+inline double cabs2(Cx a) { return a.re * a.re + a.im * a.im; }
+Cx ruthroffZin(const SweepModel &m, double w, double RL)
+{
+    double bl = w * m.tauNs * 1e-9, c = std::cos(bl), sn = std::sin(bl); double n = m.lines;
+    Cx vOut = cdiv({c + n, 0}, {c, n * m.lineZ0 * sn / RL});
+    Cx iL{vOut.re / RL, vOut.im / RL}, vd{(vOut.re - 1) / n, vOut.im / n};
+    Cx iIn = cadd(cmul({0, sn / m.lineZ0}, vd), {c * iL.re, c * iL.im});
+    Cx is = cadd({n * iIn.re, n * iIn.im}, iL);
+    return cdiv({1, 0}, is);
+}
+}
+SweepModel sweepModel(const BalunInput &inp, const Core &core, int n1, int, const Topology &top)
+{
+    bool tl = !top.turnsRatio; const Wire &cond = *conductorById(inp.conductorId);
+    SweepModel m; m.kind = tl ? "line" : "lumped"; m.lLowUH = inductanceUH(core, n1, inp.stack, 0); m.leadNH = inp.sweepLeadMM * LEAD_NH_PER_MM;
+    m.ratio = top.ratio; m.loadOhm = !std::isnan(inp.sweepLoad) ? inp.sweepLoad : top.ratio * inp.zLow; m.z0 = inp.zLow;
+    if (tl) {
+        m.lines = (int)jsRound(std::sqrt(top.ratio)) - 1; m.lineMM = n1 * turnLengthMM(core, inp.stack, cond.od);
+        m.lineZ0 = !std::isnan(inp.sweepZ0) ? inp.sweepZ0 : (cond.jacket == "enamel" ? 50 : 75); m.tauNs = m.lineMM / 1000 / (LINE_VF * C_LIGHT_MUS) * 1e3;
+    } else {
+        m.k = !std::isnan(inp.sweepK) ? inp.sweepK : sweepKDefault(top.id); m.leakNH = (1 - m.k) * m.lLowUH * 1000;
+        m.csHighPF = !std::isnan(inp.sweepCsPF) ? inp.sweepCsPF : SWEEP_CS_PF; m.csRefPF = m.csHighPF * top.ratio;
+    }
+    return m;
+}
+SweepPoint sweepPoint(const Core &core, int n1, double stack, const SweepModel &m, double fMHz, double RL, double capPF)
+{
+    double w = 2 * PI * fMHz * 1e6; Impedance zm0 = windingImpedance(core, n1, fMHz * 1e6, stack, 0); Cx zm{zm0.r, zm0.x};
+    Cx zSer, zLoad;
+    if (m.kind == "line") { zSer = ruthroffZin(m, w, RL); zLoad = zSer; }
+    else {
+        Cx zl{RL / m.ratio, 0};
+        zLoad = m.csRefPF > 0 ? cpar(zl, {0, -1 / (w * m.csRefPF * 1e-12)}) : zl;
+        zSer = cadd({0, w * m.leakNH * 1e-9}, zLoad);
+    }
+    Cx zt = cpar(zm, zSer);
+    Cx zNode = cadd({0, w * m.leadNH * 1e-9}, zt);
+    Cx zin = capPF > 0 ? cpar(zNode, {0, -1 / (w * capPF * 1e-12)}) : zNode;
+    Cx g = cdiv(cadd(zin, {-m.z0, 0}), cadd(zin, {m.z0, 0})); double ga = std::sqrt(cabs2(g));
+    Cx vt = cdiv(zt, zNode); double pCore = cabs2(vt) * cdiv({1, 0}, zm).re;
+    double pLoad = m.kind == "line" ? cabs2(vt) * cdiv({1, 0}, zSer).re : cabs2(vt) / cabs2(zSer) * zLoad.re;
+    SweepPoint p; p.fMHz = fMHz; p.r = zin.re; p.x = zin.im; p.z = std::sqrt(cabs2(zin));
+    p.swr = ga >= 0.999999 ? 999 : (1 + ga) / (1 - ga); p.rlDb = std::min(60.0, -20 * std::log10(std::max(ga, 1e-3)));
+    p.effPct = 100 * (pLoad / (pLoad + pCore)); p.mismatchDb = -10 * std::log10(std::max(1e-9, 1 - ga * ga));
+    return p;
+}
+std::vector<double> sweepFreqs(double fMin, double fMax, int n, const QString &scale)
+{
+    if (fMax <= fMin) return {fMin};
+    if (scale == "lin") { std::vector<double> out; for (int i = 0; i < n; i++) out.push_back(fMin + (fMax - fMin) * i / (n - 1)); return out; }
+    return logSpace(fMin, fMax, n);
+}
+std::vector<BandPoint> bandPoints(double fMin, double fMax)
+{
+    std::vector<BandPoint> pts;
+    for (const Band &b : bandsInRange(fMin, fMax)) for (double f : {b.lo, (b.lo + b.hi) / 2, b.hi}) pts.push_back({b.id, std::min(fMax, std::max(fMin, f))});
+    return pts;
+}
+BandSwr bandSwr(const Core &core, int n1, double stack, const SweepModel &m, const std::vector<BandPoint> &pts, double RL, double capPF)
+{
+    BandSwr r; r.has = !pts.empty(); double sum = 0;
+    for (const BandPoint &p : pts) { double s = sweepPoint(core, n1, stack, m, p.fMHz, RL, capPF).swr; sum += s; if (s > r.maxSwr) { r.maxSwr = s; r.atMHz = p.fMHz; } }
+    r.meanSwr = pts.empty() ? 0 : sum / pts.size();
+    return r;
+}
+CapOpt optimizeCap(const Core &core, int n1, double stack, const SweepModel &m, double fMin, double fMax)
+{
+    std::vector<BandPoint> pts = bandPoints(fMin, fMax);
+    if (pts.empty()) pts = {{"", fMin}, {"", std::sqrt(fMin * fMax)}, {"", fMax}};
+    CapOpt best; bool have = false;
+    for (int c = 0; c <= 330; c++) {
+        BandSwr r = bandSwr(core, n1, stack, m, pts, m.loadOhm, c);
+        if (!have || r.maxSwr < best.maxSwr - 1e-9 || (std::fabs(r.maxSwr - best.maxSwr) <= 1e-9 && r.meanSwr < best.meanSwr)) { have = true; best.pF = c; best.maxSwr = r.maxSwr; best.meanSwr = r.meanSwr; best.atMHz = r.atMHz; }
+    }
+    BandSwr off = bandSwr(core, n1, stack, m, pts, m.loadOhm, 0);
+    best.stdPF = nearestStdPF(best.pF); best.offMaxSwr = off.maxSwr; best.offMeanSwr = off.meanSwr; best.points = (int)pts.size();
+    return best;
+}
+Sweep transformerSweep(const BalunInput &inp, const Core &core, int n1, int n2, const Topology &top, double capPF)
+{
+    Sweep S; S.model = sweepModel(inp, core, n1, n2, top); S.capPF = capPF; const SweepModel &m = S.model;
+    std::vector<double> fs = sweepFreqs(inp.fMinMHz, inp.fMaxMHz, (int)inp.sweepPoints, inp.sweepScale);
+    for (double f : fs) S.points.push_back(sweepPoint(core, n1, inp.stack, m, f, m.loadOhm, capPF));
+    if (inp.sweepLoadMode == "range") for (double R : logSpace(inp.sweepLoadMin, std::max(inp.sweepLoadMax, inp.sweepLoadMin), 6)) {
+        LoadCurve lc; lc.ohm = QString::number(R, 'g', 2).toDouble();
+        for (double f : fs) lc.swr.push_back(sweepPoint(core, n1, inp.stack, m, f, lc.ohm, capPF).swr);
+        S.loads.push_back(lc);
+    }
+    std::vector<BandPoint> bp = bandPoints(inp.fMinMHz, inp.fMaxMHz);
+    if (!bp.empty()) S.band = bandSwr(core, n1, inp.stack, m, bp, m.loadOhm, capPF);
+    for (const Band &b : bandsInRange(inp.fMinMHz, inp.fMaxMHz)) {
+        double f = std::min(inp.fMaxMHz, std::max(inp.fMinMHz, (b.lo + b.hi) / 2));
+        SweepPoint p = sweepPoint(core, n1, inp.stack, m, f, m.loadOhm, capPF); p.band = b.id; S.readout.push_back(p);
+    }
+    S.opt = optimizeCap(core, n1, inp.stack, m, inp.fMinMHz, inp.fMaxMHz);
+    return S;
 }
 
 double clampv(double v, double a, double b, double d) { if (!std::isfinite(v)) v = d; return std::min(b, std::max(a, v)); }
@@ -401,6 +521,13 @@ BalunInput normalize(const BalunInput &i)
     o.turns = std::isnan(o.turns) ? NaN : jsRound(clampv(o.turns, 1, 60, 1));
     const Topology *t = topology(o.topology);
     if (t->kind == "transformer" && conductorById(o.conductorId)->kind == "coax") o.conductorId = "awg16t";
+    if (!CAP_MODES.contains(o.capMode)) o.capMode = t->kind == "choke" ? QString("off") : defaultCapMode(o.topology);
+    o.capPF = clampv(o.capPF, 0, 1000, 100); o.capRatingV = clampv(o.capRatingV, 100, 50000, 10000);
+    o.sweepPoints = jsRound(clampv(o.sweepPoints, 11, 1001, 201)); if (o.sweepScale != "lin") o.sweepScale = "log";
+    if (o.sweepLoadMode != "range") o.sweepLoadMode = "single";
+    auto opt = [](double v, double a, double b) { return std::isfinite(v) ? clampv(v, a, b, a) : NaN; };
+    o.sweepLoad = opt(o.sweepLoad, 1, 1e5); o.sweepK = opt(o.sweepK, 0.5, 1); o.sweepCsPF = opt(o.sweepCsPF, 0, 500); o.sweepZ0 = opt(o.sweepZ0, 10, 300);
+    o.sweepLoadMin = clampv(o.sweepLoadMin, 1, 1e5, 50); o.sweepLoadMax = clampv(o.sweepLoadMax, 1, 1e5, 3000); o.sweepLeadMM = clampv(o.sweepLeadMM, 0, 1000, 25);
     return o;
 }
 
@@ -511,8 +638,18 @@ DesignResult design(const BalunInput &raw)
     CondLoad condLoad = cond.kind == "coax" ? CondLoad{inp.powerW * std::max(inp.vswr, 1.0) / (top.id == "guanella41" ? 2 : 1), cond.ratedW, "W"}
                                             : CondLoad{iWire / cond.cu, MAX_CURRENT_DENSITY, "A/mm2"};
     double vHighRms = vInWorst * std::sqrt(top.ratio);
-    bool hasCap = top.id == "efhw49" || top.id == "efhw64";
-    CompCap cap{}; if (hasCap) cap = compensationCap(std::min(inp.fMaxMHz, 30.0), inp.powerW, inp.vswr);
+    // low-side shunt (compensation) capacitor across the SO-239 (v1.3.2: every transformer topology)
+    CompCap capSug{}; if (!isChoke) capSug = compensationCap(std::min(inp.fMaxMHz, 30.0), inp.powerW, inp.vswr, inp.zLow);
+    bool hasCap = !isChoke && (inp.capMode == "suggested" || (inp.capMode == "custom" && inp.capPF > 0));
+    CompCap cap{};
+    if (hasCap) {
+        double cpf = inp.capMode == "suggested" ? capSug.pF : inp.capPF, vRmsW = capSug.vPeak / SQRT2, fI = inp.fMaxMHz;
+        double iCap = vRmsW * 2 * PI * fI * 1e6 * cpf * 1e-12;
+        cap.mode = inp.capMode; cap.pF = cpf; cap.suggestedPF = capSug.pF; cap.pFcalc = capSug.pFcalc; cap.rangePF[0] = jsRound(cpf * 0.7); cap.rangePF[1] = jsRound(cpf * 1.5);
+        cap.vPeak = capSug.vPeak; cap.needV = capSug.needV; cap.minRatingV = capSug.ratingV; cap.ratingV = inp.capRatingV; cap.ratingOk = inp.capRatingV >= capSug.needV;
+        cap.iRmsA = iCap; cap.kvar = vRmsW * iCap / 1000; cap.iAtMHz = fI;
+    }
+    Sweep sweep; if (!isChoke) sweep = transformerSweep(inp, core, n1, n2, top, hasCap ? cap.pF : 0);
 
     /* checks */
     std::vector<Check> &checks = R.checks;
@@ -570,11 +707,21 @@ DesignResult design(const BalunInput &raw)
         add("auto", "info", "Autotransformer 1:" + QString::number(top.turnsRatio) + ": tap section " + QString::number(n1) + S(" turns (50 Ω side) = ") + f1(lNom, 2) + S(" µH, full winding ") + QString::number(n2) + " turns (" + jsNum(9 * inp.zLow) + S(" Ω side) = ") + f1(lFull, 1) + S(" µH (L ∝ N², ×9). Rule of thumb: tap-section XL ≥ 4–5 × ") + jsNum(inp.zLow) + S(" Ω at the lowest frequency (Cromwell; ARRL handbook practice)."));
         add("leak", "info", S("High-frequency limit: unlike the trifilar Ruthroff (a transmission-line transformer), a single tapped winding couples its sections only through the core, so leakage inductance and inter-turn/inter-section capacitance set the upper limit — keep the winding to one layer, spread evenly, and expect SWR to rise on 10–6 m; verify with a ") + jsNum(9 * inp.zLow) + S(" Ω test load."));
         add("split", "info", S("Typical published splits: 3:9 turns on FT140-43 or FT240-43, 4:12 on FT82-43 or stacked FT240-43 (hamradiobase table; Cromwell used 8 tap turns on FT140-43 for extra low-band margin). More turns help 160/80 m but add capacitance that hurts 10–6 m."));
-        CompCap cOpt = compensationCap(std::min(inp.fMaxMHz, 30.0), inp.powerW, inp.vswr);
-        add("comp", "info", S("Optional compensation capacitor across the SO-239 (as on the 49:1): usually not needed on a 9:1. If SWR into the test load climbs on 10–6 m, try values up to the 49:1 starting value (") + jsNum(cOpt.pF) + S(" pF, ≥ ") + jsNum(cOpt.ratingV) + " V) and keep what flattens the high end.");
     }
     if (top.id == "ruthroff91" || top.id == "ruthroff41") add("line", "info", "Ruthroff: wind the wires as a tight, evenly twisted bundle. The core carries the full signal flux, so it runs warmer than a Guanella (ham.stackexchange 9:1 notes; G3TXQ unun experiments).");
     if (inp.fMaxMHz > 30 && !isChoke) add("6m", "info", "Above 30 MHz (6 m) most ferrite transformers lose efficiency and match quality; check 6 m on the analyser or use a separate 6 m antenna.");
+    double rl = isChoke ? 0 : sweep.model.loadOhm;
+    if (!isChoke) {
+        if (hasCap) {
+            add("cap", cap.ratingOk ? "ok" : "fail", "Low-side shunt capacitor " + jsNum(cap.pF) + " pF (" + (cap.mode == "suggested" ? "suggested" : "your value") + "; suggestion " + jsNum(cap.suggestedPF) + S(" pF, trim ") + jsNum(capSug.rangePF[0]) + S("–") + jsNum(capSug.rangePF[1]) + " pF) rated " + kvTxt(cap.ratingV) + S(": needs ≥ ") + kvTxt(cap.minRatingV) + S(" (input peak ≈ ") + rnd(cap.vPeak) + " V at " + jsNum(inp.powerW) + " W, SWR " + jsNum(inp.vswr) + S(":1, ×5 margin)") + (cap.ratingOk ? QString("; 10 kV is typical for margin and doorknob / HV ceramic availability.") : S(" — the picked rating is BELOW the need: choose a higher-voltage capacitor.")));
+            add("capI", cap.iRmsA > 2 ? "warn" : "info", "Capacitor RF current up to " + f1(cap.iRmsA, 2) + " A RMS (" + f1(cap.kvar * 1000, 0) + " VAR) at " + f1(cap.iAtMHz, 1) + " MHz with SWR " + jsNum(inp.vswr) + ":1" + (cap.iRmsA > 2 ? S(" — use a transmitting doorknob / HV ceramic (N4700/C0G) or mica rated for that current, or parallel two; small disc ceramics overheat.") : QString("; a doorknob / HV ceramic or silver mica handles it.")));
+        } else add("cap", "info", "No low-side shunt capacitor" + (inp.capMode == "off" && defaultCapMode(top.id) == "off" ? S(" (default for the Ruthroff: a bootstrap transmission-line transformer whose leakage is the line itself, so a shunt C across the input only adds capacitive susceptance)") : QString()) + ". Many builders put ~" + jsNum(capSug.pF) + S(" pF (≥ ") + kvTxt(capSug.ratingV) + S(") from the SO-239 centre to the shell to flatten the 10–6 m SWR; the sweep's Optimize suggests ") + jsNum(sweep.opt.pF) + " pF for this design.");
+        if (hasCap && sweep.band.has && sweep.band.maxSwr > sweep.opt.offMaxSwr * 1.1) add("capEffect", "warn", "In this model the " + jsNum(cap.pF) + " pF shunt capacitor makes the worst-band SWR worse (" + f1(sweep.band.maxSwr, 2) + ":1 with it vs " + f1(sweep.opt.offMaxSwr, 2) + ":1 without); Optimize suggests " + jsNum(sweep.opt.pF) + " pF (" + f1(sweep.opt.maxSwr, 2) + ":1). Confirm on the analyser before fitting it.");
+        if (sweep.band.has) {
+            const SweepModel &m = sweep.model;
+            add("sweep", sweep.band.maxSwr <= 2 ? "info" : "warn", "Modelled SWR (" + jsNum(inp.zLow) + S(" Ω, ") + jsNum(rl) + S(" Ω resistive load") + (hasCap ? ", " + jsNum(cap.pF) + " pF shunt" : QString(", no shunt C")) + "): worst " + f1(sweep.band.maxSwr, 2) + ":1 at " + f1(sweep.band.atMHz, 3) + " MHz over the band edges/centres in range (" + (m.kind == "line" ? "line" : "lumped") + " model: " + (m.kind == "line" ? QString::number(m.lines) + " line(s) " + rnd(m.lineMM) + " mm, Z0 " + jsNum(m.lineZ0) + S(" Ω") : "k " + jsNum(m.k) + ", high-side Cs " + f1(m.csHighPF, 1) + " pF") + ", lead " + f1(m.leadNH, 0) + S(" nH — verify on the analyser)."));
+        }
+    }
 
     R.input = inp; R.topology = top; R.core = &core; R.material = &mat; R.conductor = &cond;
     R.n1 = n1; R.n2 = n2; R.nMin = nMin; R.target = target; R.zAtFmin = zFmin; R.lNom = lNom; R.lMin = lMin; R.lMax = lMax;
@@ -583,12 +730,23 @@ DesignResult design(const BalunInput &raw)
     R.fit = fit; R.passes = passes; R.turnLengthMM = turnLen; R.wires = wires; R.conductorLoad = condLoad; R.vHighRms = vHighRms;
     R.lFullUH = top.turnsRatio ? inductanceUH(core, n1, stack, 0) * top.turnsRatio * top.turnsRatio : NaN;
     R.hasCompCap = hasCap; R.compCap = cap; R.coresNeeded = (int)stack * top.coreSets;
-    R.steps = connectionSteps(top, n1, n2, useCoax, inp);
+    R.hasCapSuggestion = !isChoke; R.capSuggestion = capSug; R.hasSweep = !isChoke; R.sweep = sweep;
+    R.steps = connectionSteps(top, n1, n2, useCoax, inp, hasCap ? &cap : nullptr, rl);
     R.parts = partsList(top, core, stack, cond, wires, hasCap ? &cap : nullptr);
     return R;
 }
 
-QStringList connectionSteps(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp)
+static QStringList connectionSteps0(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp);
+QStringList connectionSteps(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp, const CompCap *cap, double rl)
+{
+    QStringList st = connectionSteps0(top, n1, n2, coax, inp);
+    if (cap) {
+        int i = top.id == "auto91" ? st.size() - 1 : top.turnsRatio ? 4 : st.size();
+        st.insert(i, "Low-side shunt capacitor: solder the " + jsNum(cap->pF) + " pF, " + kvTxt(cap->ratingV) + " capacitor directly from the SO-239 centre pin to the SO-239 shell (leads as short as possible). Trim " + jsNum(cap->rangePF[0]) + S("–") + jsNum(cap->rangePF[1]) + " pF on the analyser into a " + jsNum(rl) + S(" Ω test load for the flattest 10–6 m SWR."));
+    }
+    return st;
+}
+static QStringList connectionSteps0(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp)
 {
     QString N1 = QString::number(n1), N2 = QString::number(n2);
     if (top.id == "choke11") {
@@ -625,7 +783,6 @@ QStringList connectionSteps(const Topology &top, int n1, int n2, bool coax, cons
         S("Start of the winding → SO-239 shell and the ground/counterpoise post."),
         "Scrape the enamel and tap at turn " + N1 + S(" → SO-239 centre pin (the 50 Ω input)."),
         "End of the winding (turn " + N2 + S(") → antenna wire post. Sleeve the last turns with PTFE."),
-        S("Compensation capacitor from SO-239 centre to shell (see parts list); tune 47–150 pF on the analyser for best 10–15 m SWR."),
         "Alternative: a separate " + N1 + "-turn primary twisted over the first turns of the secondary (common in published builds)."};
 }
 
@@ -633,7 +790,7 @@ std::vector<Part> partsList(const Topology &top, const Core &core, double stack,
 {
     std::vector<Part> p = {{stack * top.coreSets, core.id + " core (" + core.pn + ", " + dimsTxt(core) + ")"}};
     for (const WireCut &w : wires) p.push_back({1, wireLabel(cond) + S(" — ") + w.name + ": " + lenDual(w.lengthMM) + " incl. leads"});
-    if (cap) p.push_back({1, jsNum(cap->pF) + S(" pF capacitor, ≥ ") + jsNum(cap->ratingV) + S(" V (e.g. C0G/NP0 ceramic or silver mica), across the 50 Ω input")});
+    if (cap) p.push_back({1, jsNum(cap->pF) + " pF capacitor rated " + kvTxt(cap->ratingV) + S(" (needs ≥ ") + kvTxt(cap->minRatingV) + S("), doorknob / HV ceramic (N4700, C0G) or silver mica — low-side shunt from SO-239 centre to shell")});
     p.push_back({1, "SO-239 (or BNC) chassis connector"});
     if (top.kind == "transformer") p.push_back({2, "Wing-nut/binding posts: antenna and ground/counterpoise"});
     p.push_back({1, "Weatherproof non-metal enclosure, cable ties, PTFE tape/sleeving"});

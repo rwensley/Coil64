@@ -1,4 +1,4 @@
-/* balun_core.h - KE9ESU Balun & Unun Designer calculation core, C++ port of core.js (BalunCore v1.3.1).
+/* balun_core.h - KE9ESU Balun & Unun Designer calculation core, C++ port of core.js (BalunCore v1.3.2).
    Pure calculations, no widgets. Every function is a 1:1 translation of the JavaScript original so that the
    C++ port and the web app give identical numbers and text (see tests/ke9esu_tests).
    Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later.
@@ -34,7 +34,7 @@ If not, see <https://www.gnu.org/licenses/>.
 
 namespace ke9esu {
 
-static const char *const CORE_VERSION = "1.3.1";
+static const char *const CORE_VERSION = "1.3.2";
 static const double MU0 = 4e-7 * PI;
 
 struct Material {
@@ -89,11 +89,31 @@ struct BalunInput {
     QString duty = "digital"; double dutyPercent = 100;
     double xlFactor = 5, chokeTarget = 5000, cmPercent = 10, leadMM = 100, ambientC = 30;
     QString csMode = "k9yc"; double csPF = 1.3;
+    // v1.3.2: low-side shunt (compensation) capacitor and frequency sweep. NaN = JS null (auto).
+    QString capMode = "default"; double capPF = 100, capRatingV = 10000;
+    double sweepPoints = 201; QString sweepScale = "log", sweepLoadMode = "single";
+    double sweepLoad = NaN, sweepLoadMin = 50, sweepLoadMax = 3000, sweepLeadMM = 25, sweepK = NaN, sweepCsPF = NaN, sweepZ0 = NaN;
 };
 
 struct PerFreq { double fMHz, r, x, z, bPk_mT, bHeat_G, heatLimit_G, lossPeakW, lossMatchedW; };
 struct WireCut { QString name; int turns; double lengthMM; };
-struct CompCap { double pF, pFcalc; double rangePF[2]; double vPeak, ratingV; };
+/* compensationCap() fills pF..ratingV (ratingV = smallest standard rating >= needV); design() adds the picked part:
+   mode, ratingV = the user's pick, minRatingV = the computed minimum, ratingOk, RF current. */
+struct CompCap {
+    QString mode; double pF = 0, pFcalc = 0; double rangePF[2] = {0, 0}; double vPeak = 0, needV = 0, ratingV = 0;
+    double suggestedPF = 0, minRatingV = 0, iRmsA = 0, kvar = 0, iAtMHz = 0; bool ratingOk = true;
+};
+/* Transformer frequency sweep (v1.3.2), see core.js sweepModel(). kind "lumped" (tapped autotransformers) | "line" (Ruthroff). */
+struct SweepModel {
+    QString kind; double lLowUH = 0, leadNH = 0, ratio = 1, loadOhm = 50, z0 = 50;
+    double k = NaN, leakNH = 0, csHighPF = 0, csRefPF = 0, lineZ0 = 0, lineMM = 0, tauNs = 0; int lines = 0;
+};
+struct SweepPoint { double fMHz = 0, r = 0, x = 0, z = 0, swr = 1, rlDb = 0, effPct = 0, mismatchDb = 0; QString band; };
+struct BandPoint { QString band; double fMHz; };
+struct BandSwr { bool has = false; double maxSwr = 0, meanSwr = 0, atMHz = NaN; };
+struct CapOpt { double pF = 0, maxSwr = 0, meanSwr = 0, atMHz = NaN, stdPF = 0, offMaxSwr = 0, offMeanSwr = 0; int points = 0; };
+struct LoadCurve { double ohm; std::vector<double> swr; };
+struct Sweep { SweepModel model; double capPF = 0; std::vector<SweepPoint> points; std::vector<LoadCurve> loads; BandSwr band; std::vector<SweepPoint> readout; CapOpt opt; };
 struct Fit { int perLayer, layers; double fill; };
 struct CondLoad { double value, limit; QString unit; };
 
@@ -119,6 +139,8 @@ struct DesignResult {
     double vHighRms = 0;
     double lFullUH = NaN;
     bool hasCompCap = false; CompCap compCap{};
+    bool hasCapSuggestion = false; CompCap capSuggestion{};   // chokes: none
+    bool hasSweep = false; Sweep sweep;
     int coresNeeded = 0;
     std::vector<Check> checks;
     QStringList steps;
@@ -163,14 +185,29 @@ double tempRiseC(double lossW, double surfaceCm2);
 double mismatchFactor(double vswr);
 double turnLengthMM(const Core &core, double stack, double condOd);
 Fit windingFit(const Core &core, double condOd, double passes);
-CompCap compensationCap(double fTopMHz, double powerW, double vswr);
+CompCap compensationCap(double fTopMHz, double powerW, double vswr, double zLow = 50);
+extern const std::vector<double> CAP_RATINGS;   // 500 V ... 30 kV incl. 7.5 kV and 10 kV (defined in trap_core.cpp)
+extern const std::vector<double> CAP_STD_PF;    // 10 ... 330 pF (E12)
+extern const QStringList CAP_MODES;              // off, suggested, custom
+QString kvTxt(double v);                          // "10 kV", "7.5 kV", "500 V"
+QString defaultCapMode(const QString &topId);    // suggested | off | na (chokes)
+double nearestStdPF(double v);
+extern const double SWEEP_CS_PF, LINE_VF, LEAD_NH_PER_MM;
+double sweepKDefault(const QString &topId);
+SweepModel sweepModel(const BalunInput &inp, const Core &core, int n1, int n2, const Topology &top);
+SweepPoint sweepPoint(const Core &core, int n1, double stack, const SweepModel &m, double fMHz, double RL, double capPF);
+std::vector<double> sweepFreqs(double fMin, double fMax, int n, const QString &scale);
+std::vector<BandPoint> bandPoints(double fMin, double fMax);
+BandSwr bandSwr(const Core &core, int n1, double stack, const SweepModel &m, const std::vector<BandPoint> &pts, double RL, double capPF);
+CapOpt optimizeCap(const Core &core, int n1, double stack, const SweepModel &m, double fMin, double fMax);
+Sweep transformerSweep(const BalunInput &inp, const Core &core, int n1, int n2, const Topology &top, double capPF);
 BalunInput normalize(const BalunInput &raw);
 std::vector<double> logSpace(double a, double b, int n);
 std::vector<double> evalFrequencies(double fMin, double fMax);
 std::vector<Band> bandsInRange(double fMinMHz, double fMaxMHz);
 double strayPF(const BalunInput &inp, const Core &core, double N);
 DesignResult design(const BalunInput &raw);
-QStringList connectionSteps(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp);
+QStringList connectionSteps(const Topology &top, int n1, int n2, bool coax, const BalunInput &inp, const CompCap *cap = nullptr, double rl = 0);
 std::vector<Part> partsList(const Topology &top, const Core &core, double stack, const Wire &cond, const std::vector<WireCut> &wires, const CompCap *cap);
 double selfResonanceMHz(const Core &core, double N, double stack, double csPF);   // NaN = none
 struct CurvePoint { double fMHz, r, x, z; };

@@ -1,4 +1,4 @@
-/* eflw_core.h - KE9ESU end-fed long-wire (EFLW) analyzer core, C++ port of the EFLW section of core.js v1.3.1,
+/* eflw_core.h - KE9ESU end-fed long-wire (EFLW) analyzer core, C++ port of the EFLW section of core.js v1.3.2,
    plus KE9ESU-fork additions (recommended transformer, trap suggestions) used for value passing between windows.
    halfWaveFt(f) = 491.8 * k / f(MHz), k ~ 0.95 (end effect / velocity in wire). For each band the wire length is
    expressed in half-waves h; zones: near integer h -> very high Z (good for 49:1/64:1, bad for 9:1); near h = m+0.5
