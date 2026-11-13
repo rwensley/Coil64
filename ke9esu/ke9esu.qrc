@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/ke9esu">
+        <file alias="amidon_ordered.json">data/amidon_ordered.json</file>
+        <file alias="mu/31.csv">../data/31-Material-Fair-Rite.csv</file>
+        <file alias="mu/43.csv">../data/43-Material-Fair-Rite.csv</file>
+        <file alias="mu/52.csv">../data/52-Material-Fair-Rite.csv</file>
+        <file alias="mu/61.csv">../data/61-Material-Fair-Rite.csv</file>
+        <file alias="mu/67.csv">../data/67-Material-Fair-Rite.csv</file>
+        <file alias="mu/68.csv">../data/68-Material-Fair-Rite.csv</file>
+        <file alias="mu/75.csv">../data/75-Material-Fair-Rite.csv</file>
+        <file alias="mu/77.csv">../data/77-Material-Fair-Rite.csv</file>
+    </qresource>
+</RCC>
