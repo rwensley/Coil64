@@ -265,5 +265,68 @@ double evalTree(const Node &n, QChar type)
     return n.op == 1 ? ser : par;
 }
 
+/* ------------------------------------------------------------------ display helpers */
+static int seriesN(const QString &series) { QString d = series; d.remove(QRegularExpression("\\D")); return d.toInt(); }
+QString seriesTolerance(const QString &series)
+{
+    switch (seriesN(series)) {
+    case 6: return S("±20%"); case 12: return S("±10%"); case 24: return S("±5%"); case 48: return S("±2%"); case 96: return S("±1%");
+    case 192: return S("±0.5%, ±0.25% or ±0.1%"); default: return QString();
+    }
+}
+QString seriesLabel(const QString &series)
+{
+    int n = seriesN(series); if (seriesTolerance(series).isEmpty()) return series;
+    return "E" + QString::number(n) + (n == 192 ? QString(" (0.5% / 0.25% / 0.1%)") : " (" + QString(seriesTolerance(series)).remove(QChar(0x00B1)) + ")");
+}
+QString seriesHint(const QString &series)
+{
+    QString t = seriesTolerance(series); return t.isEmpty() ? QString() : "Parts in this series are typically " + t;
+}
+double seriesTolFrac(const QString &series)
+{
+    switch (seriesN(series)) { case 6: return 0.2; case 12: return 0.1; case 24: return 0.05; case 48: return 0.02; case 96: return 0.01; case 192: return 0.005; default: return NaN; }
+}
+QString pctText(double e)
+{
+    double a = std::fabs(e * 100);
+    if (a == 0 || a < 1e-9) return "0 % (exact)";
+    QString s;
+    if (a >= 0.01) s = toFixed(a, a >= 1 ? 2 : 3);
+    else {   // Number.prototype.toPrecision(2)
+        double r = toPrecisionNum(a, 2); int ex = (int)std::floor(std::log10(r));
+        s = ex < -6 ? toFixed(r / std::pow(10, ex), 1) + "e" + QString::number(ex) : toFixed(r, 1 - ex);
+    }
+    return (e > 0 ? QString("+") : QString(QChar(0x2212))) + s + " %";
+}
+bool withinTol(double err, double tolPct) { return std::fabs(err) <= tolPct / 100 + 1e-12; }
+QString tolBadge(double err, double tolPct) { return (withinTol(err, tolPct) ? S("within ±") : S("outside ±")) + jsNum(tolPct) + "%"; }
+QString partsSummary(const std::vector<double> &parts, const QString &unit)
+{
+    QStringList keys; QMap<QString, int> n;
+    for (double v : parts) { QString k = fmt(v, 4, unit); if (!n.contains(k)) keys << k; n[k]++; }
+    QStringList out; for (const QString &k : keys) out << (n[k] > 1 ? QString::number(n[k]) + S("× ") : QString()) + k;
+    return out.join(", ");
+}
+int leafCount(const Node &n) { if (n.leaf) return 1; int c = 0; for (const Node &k : n.kids) c += leafCount(k); return c; }
+static double evalScaled(const Node &n, QChar type, int target, double f, int &idx)
+{
+    if (n.leaf) { double v = idx == target ? n.v * f : n.v; idx++; return v; }
+    double s = 0, inv = 0; for (const Node &k : n.kids) { double x = evalScaled(k, type, target, f, idx); s += x; inv += 1 / x; }
+    double ser = type == 'C' ? 1 / inv : s, par = type == 'C' ? s : 1 / inv;
+    return n.op == 1 ? ser : par;
+}
+Spread partSpread(const Node &n, QChar type, double t)
+{
+    Spread sp; if (!(t > 0)) return sp;
+    int cnt = leafCount(n), i0 = 0; double V = evalScaled(n, type, -1, 1, i0), h = 1e-6, worst = 0, ss = 0;
+    for (int k = 0; k < cnt; k++) {
+        int a = 0, b = 0; double up = evalScaled(n, type, k, 1 + h, a), dn = evalScaled(n, type, k, 1 - h, b);
+        double sens = (up - dn) / (2 * h * V);   // relative sensitivity d(lnV)/d(ln v_k)
+        worst += std::fabs(sens); ss += sens * sens;
+    }
+    sp.worst = worst * t; sp.typical = std::sqrt(ss) * t; return sp;
+}
+
 } // namespace cc
 } // namespace ke9esu

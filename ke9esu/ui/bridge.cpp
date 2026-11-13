@@ -383,6 +383,21 @@ void Bridge::screenshots(const QString &dir)
             Ke9esuDialog *d = openWindow(w); d->resize(1280, 820);
             if (CombinerDialog *c = qobject_cast<CombinerDialog *>(d)) c->runSync();
             g2(d, QString("%1_%2").arg(i2++).arg(QString(w).replace(QRegularExpression("[^A-Za-z0-9]+"), "_")));
+            if (CombinerDialog *c = qobject_cast<CombinerDialog *>(d)) {   // M2b: % tolerance on every row and the wiring diagrams
+                QJsonObject keep = c->saveState();
+                auto pick = [&](int minParts, bool wantParallelInside) { const auto &rs = c->results();
+                    for (int k = 0; k < (int)rs.size(); k++) if (rs[k].count >= minParts && (!wantParallelInside || rs[k].expr.contains('('))) return k; return 0; };
+                c->setInputs('R', "1234", "series", 3); c->runSync(); c->selectResult(pick(2, false)); g2(c, "16_combiner_series_R");
+                c->setInputs('R', "1234", "mixed", 4); c->runSync(); c->selectResult(pick(3, true)); g2(c, "17_combiner_mixed_R");
+                c->setInputs('C', "47p", "parallel", 3); c->runSync(); c->selectResult(pick(2, false)); g2(c, "18_combiner_parallel_C");
+                c->setInputs('L', "4.87u", "mixed", 4); c->runSync(); c->selectResult(pick(3, true)); g2(c, "19_combiner_mixed_L");
+                for (int k = 0; k < 4; k++) stepFont(+1);
+                c->setInputs('R', "1234", "mixed", 4); c->runSync(); c->selectResult(pick(3, true)); g2(c, "24_combiner_large_text"); stepFont(0);
+                if (style == StyleKe9esuLight) { QString dd = dir + "/drawings"; QDir().mkpath(dd); const auto imgs = c->drawings();
+                    for (auto it = imgs.constBegin(); it != imgs.constEnd(); ++it) it.value().save(dd + "/combiner_" + it.key() + ".png");
+                    c->exportSheetPdf(sub + "/24_combiner_sheet.pdf"); }
+                c->loadState(keep);
+            }
             if (BalunDialog *bd = qobject_cast<BalunDialog *>(d)) {
                 bd->applyPreset("ke9esu-auto91"); g2(bd, "20_balun_auto91"); bd->applyPreset("ke9esu-choke"); g2(bd, "21_balun_choke"); bd->applyPreset("ke9esu");
                 bd->resize(1024, 700); g2(bd, "22_balun_1024px");

@@ -34,6 +34,22 @@ Solution solve(const Params &p, const std::function<bool(const QString &, double
 std::vector<Result> sortResults(const std::vector<Result> &results, const QString &mode, double tolPct);   // mode "accuracy" | "simple"
 double evalTree(const Node &n, QChar type);   // independent evaluator (tests)
 
+/* ---- display helpers shared by the Coil64 window, its build sheet and the tests (same text as ComponentCombiner.html) */
+QString seriesTolerance(const QString &series);   // "±10%"; E192 "±0.5%, ±0.25% or ±0.1%"; "" if unknown
+QString seriesLabel(const QString &series);       // "E12 (10%)", "E192 (0.5% / 0.25% / 0.1%)" - the web app's option text
+QString seriesHint(const QString &series);        // "Parts in this series are typically ±10%"
+double seriesTolFrac(const QString &series);      // usual part tolerance as a fraction (E192: 0.005); NaN if unknown
+QString pctText(double err);                      // web app pct(): "0 % (exact)", "+0.040 %", "−1.25 %" (U+2212 minus)
+bool withinTol(double err, double tolPct);        // |err| <= tol (same 1e-12 slack as the solver's ranking)
+QString tolBadge(double err, double tolPct);      // "within ±1%" / "outside ±1%"
+QString partsSummary(const std::vector<double> &parts, const QString &unit);   // "2× 1 kΩ, 470 Ω"
+/* Spread of a network's value caused by its parts' own tolerance t (fraction). worst = all parts at the same limit
+   (for any series/parallel network this equals t exactly); typical = independent random errors (root-sum-square of
+   the relative sensitivities), which is smaller for networks of several similar parts. */
+struct Spread { double worst = 0, typical = 0; };
+Spread partSpread(const Node &n, QChar type, double t);
+int leafCount(const Node &n);
+
 } // namespace cc
 } // namespace ke9esu
 #endif

@@ -44,8 +44,10 @@ Menu **RF transformers & traps**:
 - **Coax trap** and **LC trap** — turns / coil / capacitor, Q, SRF, voltage and current checks, reactance on the other bands.
 - **Core database** — Fair-Rite + Micrometals (datasheets) or Amidon (with corrections, e.g. FT-240-43 AL 1075,
   T-50-6 AL 40) or all, AL cross-checks, source links.
-- **Find standard-part combination** — series / parallel / mixed networks of up to 6 parts from E6…E192 or your own
-  parts list, for any needed R, C or L.
+- **Find standard-part combination** — series / parallel / mixed networks of up to 6 parts from E6…E192 (each series
+  shown with its usual part tolerance, e.g. "E12 (10%)") or your own parts list, for any needed R, C or L. Every
+  result shows its error %, whether it is within your ±% and a wiring diagram (R1, R2 … with values); the selected
+  one is drawn large with the spread its parts' own tolerance causes.
 - **KE9ESU presets** — 9:1 Ruthroff (2 × FT240-43, 4 trifilar turns AWG 16 PTFE), 9:1 autotransformer 4:12 on
   2 × FT240-43, feedline choke 16 turns RG-400 on a 2.4" #31 core.
 

@@ -3,7 +3,7 @@
 include($$PWD/ke9esu.pri)
 QT += widgets printsupport
 INCLUDEPATH += $$PWD/ui
-UI_H = theme project widgets diagram drawings coreui balundialog eflwdialog trapdialogs coredbdialog combinerdialog bridge
+UI_H = theme project widgets diagram drawings netdiagram coreui balundialog eflwdialog trapdialogs coredbdialog combinerdialog bridge
 for(f, UI_H) {
     HEADERS += $$PWD/ui/$${f}.h
     SOURCES += $$PWD/ui/$${f}.cpp

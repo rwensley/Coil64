@@ -29,6 +29,9 @@
 #include <QPalette>
 #include "theme.h"
 #include "viewprefs.h"
+#include "netdiagram.h"
+#include <QImage>
+#include <QPainter>
 bool isDarkStyle(int styleGUI);   // ke9esu/ui/theme.cpp
 
 using namespace ke9esu;
@@ -653,6 +656,115 @@ static void viewPrefsTests()
     });
 }
 
+
+/* ---------------------------------------------------------------- Milestone 2b: combiner tolerance display and wiring diagrams */
+static cc::Node leafN(double v) { cc::Node n; n.leaf = true; n.v = v; n.x = v; return n; }
+static cc::Node opN(int op, std::vector<cc::Node> kids) { cc::Node n; n.leaf = false; n.op = op; n.kids = std::move(kids); return n; }
+static bool dark(const QImage &img, int x, int y) { if (x < 0 || y < 0 || x >= img.width() || y >= img.height()) return false; return qGray(img.pixel(x, y)) < 110; }
+static int darkCount(const QImage &img, QRect r = QRect()) { if (r.isNull()) r = img.rect(); int n = 0; for (int y = r.top(); y <= r.bottom(); y++) for (int x = r.left(); x <= r.right(); x++) n += dark(img, x, y); return n; }
+static void combinerUiTests()
+{
+    t("combiner: every value series shows its % tolerance (same text as the web app's Value series list)", [] {
+        QStringList want = {"E6 (20%)", "E12 (10%)", "E24 (5%)", "E48 (2%)", "E96 (1%)", "E192 (0.5% / 0.25% / 0.1%)"}, got;
+        for (const char *s : {"E6", "E12", "E24", "E48", "E96", "E192"}) got << cc::seriesLabel(s);
+        REQ(got == want, got.join(" | "));
+        REQ1(cc::seriesHint("E12") == S("Parts in this series are typically ±10%") && cc::seriesHint("E192") == S("Parts in this series are typically ±0.5%, ±0.25% or ±0.1%"));
+        REQ1(cc::seriesTolFrac("E6") == 0.2 && cc::seriesTolFrac("E24") == 0.05 && cc::seriesTolFrac("E192") == 0.005 && std::isnan(cc::seriesTolFrac("custom")) && cc::seriesHint("custom").isEmpty());
+    });
+    t("combiner: error % text identical to the web app's pct()", [] {
+        const std::pair<double, const char *> cases[] = {{0, "0 % (exact)"}, {0.0004, "+0.040 %"}, {-0.0125, "−1.25 %"}, {1e-7, "+0.000010 %"}, {-3.3e-6, "−0.00033 %"},
+                                                         {1e-9, "+1.0e-7 %"}, {0.12345, "+12.35 %"}, {-0.000123456, "−0.012 %"}, {0.01, "+1.00 %"}};
+        for (const auto &c : cases) REQ(cc::pctText(c.first) == S(c.second), cc::pctText(c.first) + " vs " + S(c.second));
+        REQ1(cc::tolBadge(0.004, 1) == S("within ±1%") && cc::tolBadge(-0.02, 1) == S("outside ±1%") && cc::tolBadge(0.01, 1) == S("within ±1%") && cc::tolBadge(0.006, 0.5) == S("outside ±0.5%"));
+    });
+    t("combiner: SERIES results show error % and tolerance like parallel and mixed (R, C, L)", [] {
+        for (QChar ty : {QChar('R'), QChar('C'), QChar('L')}) for (const char *topo : {"series", "parallel", "mixed"}) {
+            double target = ty == 'R' ? 1234 : ty == 'C' ? 1.234e-9 : 12.34e-6;
+            cc::Solution s = cc::solve(P(ty, target, "E12", 3, topo)); REQ(!s.results.empty(), QString(ty) + topo);
+            bool multi = false;
+            for (const cc::Result &r : cc::sortResults(s.results, "simple", 1)) {
+                QString e = cc::pctText(r.err), b = cc::tolBadge(r.err, 1);
+                REQ(e.contains(" %") && !e.isEmpty(), e); REQ(b.endsWith(S("±1%")), b);
+                REQ(close(r.err, (r.value - target) / target, 1e-9), r.expr);
+                REQ(cc::withinTol(r.err, 1) == (std::fabs(r.err) <= 0.01 + 1e-12), r.expr);
+                if (r.count > 1) { multi = true; REQ(r.expr.contains(QString(topo) == "parallel" ? "||" : QString(topo) == "series" ? "+" : ""), r.expr); }
+            }
+            REQ(multi, QString(ty) + topo + ": no multi-part result to show");
+        }
+        auto s = cc::sortResults(cc::solve(P('R', 1234, "E12", 3, "series")).results, "simple", 1)[0];
+        REQ(s.expr.contains('+') && cc::withinTol(s.err, 1) && cc::pctText(s.err).contains('%'), s.expr + " " + cc::pctText(s.err));
+    });
+    t("combiner: part-tolerance spread (worst = part tol for any network, typical = RSS)", [] {
+        double t10 = 0.1;
+        cc::Spread one = cc::partSpread(leafN(1000), 'R', t10); REQ1(close(one.worst, 0.1, 1e-6) && close(one.typical, 0.1, 1e-6));
+        cc::Spread ser = cc::partSpread(opN(1, {leafN(1000), leafN(1000)}), 'R', t10); REQ1(close(ser.worst, 0.1, 1e-6) && close(ser.typical, 0.1 / std::sqrt(2.0), 1e-6));
+        cc::Spread par = cc::partSpread(opN(2, {leafN(1e-9), leafN(1e-9), leafN(1e-9)}), 'C', t10); REQ1(close(par.worst, 0.1, 1e-6) && close(par.typical, 0.1 / std::sqrt(3.0), 1e-6));
+        cc::Spread uneq = cc::partSpread(opN(1, {leafN(1000), leafN(10)}), 'L', t10); REQ1(close(uneq.worst, 0.1, 1e-6) && uneq.typical > 0.098 && uneq.typical < 0.1);
+        for (QChar ty : {QChar('R'), QChar('C'), QChar('L')}) for (const cc::Result &r : cc::solve(P(ty, ty == 'R' ? 4321 : ty == 'C' ? 4.321e-9 : 4.321e-6, "E24", 4, "mixed")).results) {
+            cc::Spread sp = cc::partSpread(r.tree, ty, 0.05); REQ(close(sp.worst, 0.05, 1e-5) && sp.typical <= sp.worst + 1e-12 && sp.typical >= 0.05 / std::sqrt((double)r.count) - 1e-9, r.expr);
+        }
+        REQ1(cc::partsSummary({1000, 1000, 470}, S("Ω")) == S("2× 1 kΩ, 470 Ω"));
+    });
+    t("combiner diagram: layout - series side by side, parallel stacked, nested, designators", [] {
+        QSizeF one = net::size(leafN(1000), 'R'), s2 = net::size(opN(1, {leafN(1000), leafN(220)}), 'R'), p2 = net::size(opN(2, {leafN(1000), leafN(220)}), 'R');
+        REQ1(one.width() > 100 && std::fabs(one.height() - 64) < 1e-9);
+        REQ1(s2.width() > one.width() + 80 && std::fabs(s2.height() - one.height()) < 1e-9);           // series: wider, same height
+        REQ1(std::fabs(p2.height() - (2 * 52 + 10 + 12)) < 1e-9 && p2.width() < s2.width());           // parallel: two rows + gap
+        cc::Node mixed = opN(1, {leafN(1000), opN(2, {leafN(2200), leafN(4700), leafN(10000)})});
+        QSizeF m = net::size(mixed, 'R'); REQ1(m.height() > p2.height() && m.width() > p2.width());
+        net::Options nod; nod.designators = false; REQ1(net::size(leafN(1000), 'R', nod).width() <= one.width());
+        net::Options cap; cap.caption = S("A–B = 1.2335 kΩ (error −0.04 %)"); REQ1(net::size(mixed, 'R', cap).height() > m.height());
+        REQ1(net::prefix('R') == "R" && net::prefix('C') == "C" && net::prefix('L') == "L");
+    });
+    t("combiner diagram: renders R, C and L series / parallel / mixed networks (rails, junction dots, symbols, labels)", [] {
+        for (QChar ty : {QChar('R'), QChar('C'), QChar('L')}) {
+            double u = ty == 'R' ? 1000 : ty == 'C' ? 1e-9 : 1e-6;
+            cc::Node ser = opN(1, {leafN(u), leafN(2.2 * u)}), par = opN(2, {leafN(u), leafN(2.2 * u), leafN(4.7 * u)}), mix = opN(2, {ser, leafN(10 * u)});
+            for (const cc::Node &n : {leafN(u), ser, par, mix}) {
+                QSizeF sz = net::size(n, ty); QImage img = net::render(n, ty, 2);
+                REQ1(img.width() == int(std::ceil(sz.width() * 2)) && img.height() == int(std::ceil(sz.height() * 2)));
+                int ink = darkCount(img); REQ(ink > 300 * (n.leaf ? 1 : (int)n.kids.size()), QString::number(ink));
+                REQ(qGray(img.pixel(1, 1)) > 250 && qGray(img.pixel(img.width() - 2, img.height() - 2)) > 250, "paper background");
+                REQ(darkCount(img, QRect(0, 0, img.width(), 2 * 20)) > 20, "value labels on top row");   // labels drawn
+                QImage big = net::render(n, ty, 4); REQ1(std::abs(big.width() - 2 * img.width()) <= 2);   // scales for large text
+            }
+            // parallel: two vertical rails, junction dots at the middle branch
+            QImage pi = net::render(par, ty, 2); QSizeF ps = net::size(par, ty);
+            double railX = (6 + 22 + 9) * 2, top = (6 + 34) * 2, bot = (6 + 2 * 62 + 34) * 2, mid = (top + bot) / 2;
+            int run = 0; for (int y = int(top) + 3; y < int(bot) - 3; y++) run += dark(pi, int(railX), y) || dark(pi, int(railX) + 1, y) || dark(pi, int(railX) - 1, y);
+            REQ(run >= int(bot - top) - 10, QString("rail %1 of %2").arg(run).arg(bot - top));
+            REQ(dark(pi, int(railX) + 4, int(mid)) && dark(pi, int(railX) - 4, int(mid) + 3), "junction dot");
+            double railR = (ps.width() - 6 - 22 - 9) * 2;
+            int runR = 0; for (int y = int(top) + 3; y < int(bot) - 3; y++) runR += dark(pi, int(railR), y) || dark(pi, int(railR) + 1, y) || dark(pi, int(railR) - 1, y);
+            REQ(runR >= int(bot - top) - 10, "right rail");
+            // series: one through-wire, no rails
+            QImage si = net::render(ser, ty, 2); int longest = 0;
+            for (int x = 0; x < si.width(); x++) { int runv = 0; for (int y = 0; y < si.height(); y++) { runv = dark(si, x, y) ? runv + 1 : 0; longest = std::max(longest, runv); } }
+            REQ(longest < 70, QString::number(longest));
+        }
+    });
+    t("combiner diagram: readable in KE9ESU Light and Dark (ink on paper) and the same drawing in every theme", [] {
+        cc::Node mix = opN(1, {leafN(1000), opN(2, {leafN(2200), leafN(4700)})});
+        for (const ThemeColors &c : {lightColors(), darkColors()}) {
+            QSizeF sz = net::size(mix, 'R'); QImage img(int(sz.width() * 2), int(sz.height() * 2), QImage::Format_ARGB32); img.fill(c.paper);
+            QPainter p(&img); net::Options o; o.ink = c.paperInk; double s = net::paint(p, QRectF(0, 0, img.width(), img.height()), mix, 'R', o, 2); p.end();
+            REQ1(std::fabs(s - 2) < 1e-9 && contrast(c.paperInk, c.paper) >= 12);
+            int inkPx = 0; for (int y = 0; y < img.height(); y++) for (int x = 0; x < img.width(); x++) if (contrast(QColor(img.pixel(x, y)), c.paper) > 6) inkPx++;
+            REQ(inkPx > 600, QString::number(inkPx));
+        }
+        // fitting into a small cell never upscales past maxScale and keeps the aspect ratio
+        QImage cell(300, 60, QImage::Format_ARGB32); cell.fill(Qt::white); QPainter p(&cell);
+        double s = net::paint(p, QRectF(0, 0, 300, 60), mix, 'R', net::Options(), 1.0); p.end(); QSizeF sz = net::size(mix, 'R');
+        REQ1(s <= 1.0 && sz.height() * s <= 60 + 1e-9 && sz.width() * s <= 300 + 1e-9);
+    });
+    t("combiner diagram: every result of 4-part mixed R/C/L searches draws (designators = parts)", [] {
+        for (QChar ty : {QChar('R'), QChar('C'), QChar('L')}) for (const cc::Result &r : cc::solve(P(ty, ty == 'R' ? 1234 : ty == 'C' ? 1.234e-9 : 1.234e-6, "E12", 4, "mixed")).results) {
+            REQ(cc::leafCount(r.tree) == r.count, r.expr);
+            QImage img = net::render(r.tree, ty, 1); REQ(!img.isNull() && darkCount(img) > 150 * r.count, r.expr);
+        }
+    });
+}
+
 int main(int argc, char **argv)
 {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");   // theme tests need a QApplication, no display
@@ -663,6 +775,7 @@ int main(int argc, char **argv)
     portedCombinerTests();
     projectTests();
     viewPrefsTests();
+    combinerUiTests();
     goldenTests(dir);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("Failed: %s\n", g_failed.join("; ").toUtf8().constData());
