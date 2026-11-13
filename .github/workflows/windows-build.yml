@@ -54,13 +54,34 @@ jobs:
           if (-not $exe) { throw "Coil64.exe not found" }
           New-Item -ItemType Directory -Force $env:PKG | Out-Null
           Copy-Item $exe.FullName "$env:PKG\"
-          windeployqt --release --compiler-runtime --no-translations "$env:PKG\Coil64.exe"
+          # Use the windeployqt/qmake of the Qt we built against, not whatever is first on PATH
+          $qtbin   = Join-Path $env:QT_ROOT_DIR 'bin'
+          $plugins = Join-Path $env:QT_ROOT_DIR 'plugins'
+          Get-Command windeployqt, qmake -All -ErrorAction SilentlyContinue | Format-Table Source
+          & "$qtbin\qmake.exe" -query QT_INSTALL_PLUGINS
+          Get-ChildItem "$plugins\platforms" -ErrorAction SilentlyContinue | Format-Table Name
+          & "$qtbin\windeployqt.exe" --release --compiler-runtime --no-translations --dir "$env:PKG" "$env:PKG\Coil64.exe"
+          Write-Host "windeployqt exit code: $LASTEXITCODE"
+          # Belt and braces: make sure the platform plugin, styles, Qt DLLs and MinGW runtime are present
+          foreach ($d in 'platforms','styles','imageformats','printsupport') {
+            if ((Test-Path "$plugins\$d") -and -not (Test-Path "$env:PKG\$d")) {
+              New-Item -ItemType Directory -Force "$env:PKG\$d" | Out-Null
+              Get-ChildItem "$plugins\$d\*.dll" | Where-Object { $_.BaseName -notmatch 'd$' -or $_.BaseName -eq 'qwindowsvistastyle' } |
+                Copy-Item -Destination "$env:PKG\$d\"
+            }
+          }
+          foreach ($dll in 'Qt5Core','Qt5Gui','Qt5Network','Qt5PrintSupport','Qt5Widgets','Qt5Svg','libgcc_s_seh-1','libstdc++-6','libwinpthread-1') {
+            if ((Test-Path "$qtbin\$dll.dll") -and -not (Test-Path "$env:PKG\$dll.dll")) { Copy-Item "$qtbin\$dll.dll" "$env:PKG\" }
+          }
+          if (-not (Test-Path "$env:PKG\platforms\qwindows.dll")) { throw "platforms\qwindows.dll missing from package" }
           # Coil64 reads the Fair-Rite material curves from <exe dir>\Data at run time
           Copy-Item -Recurse data "$env:PKG\Data"
           Copy-Item LICENSE, README.md, README_KE9ESU.md "$env:PKG\"
           Copy-Item -Recurse docs "$env:PKG\docs"
           Compress-Archive -Path "$env:PKG\*" -DestinationPath "$env:PKG.zip" -Force
-          Get-ChildItem $env:PKG | Format-Table Name, Length
+          Get-ChildItem $env:PKG -Recurse -File | Format-Table FullName, Length -AutoSize
+          Get-Item "$env:PKG.zip" | Format-Table Name, Length
+          exit 0
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
