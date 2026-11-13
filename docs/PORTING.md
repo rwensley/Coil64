@@ -224,6 +224,13 @@ long-wire recommendation / traps, JSON round trip, project save/open, units), an
 `ke9esu/tools/gen_golden.js` / `gen_golden_cc.js` from the JS sources (`golden.json`, `golden_cc.json`).
 JSON writes NaN / ±Infinity as null; the diff accepts null for a non-finite C++ value.
 
+CI (`.github/workflows/windows-build.yml`): Windows (Qt 5.15.2 / MinGW 8.1) builds Coil64 and the test target, runs
+the tests, packages with windeployqt, then runs a smoke copy of the package with `KE9ESU_SHOTS=<dir>` (the bridge opens
+every RF window, exercises the Coil64 links, grabs PNGs, exports every build sheet as PDF, saves/opens a project file
+and quits). Linux (Qt 5.15.2 gcc_64) does the same headless (`QT_QPA_PLATFORM=offscreen`). The combiner's 6-part
+speed tests keep the JS suite's 6 s budget locally; CI sets `KE9ESU_SPEED_LIMIT_MS=20000` for shared runners
+(measured ≈5.3 s on windows-2022). Windows note: `<windows.h>` defines `near`/`far`, so core structs avoid those names.
+
 Known approximations / gaps
 - The long-wire guide text is condensed relative to the web app's prose; numbers and classifications are identical.
 - A Coil64 coil passed to the LC trap uses the nearest wire in the trap's coil-wire list (Coil64 allows any diameter).

@@ -90,14 +90,18 @@ jobs:
           Copy-Item -Recurse data "$env:PKG\Data"
           Copy-Item LICENSE, README.md, README_KE9ESU.md "$env:PKG\"
           Copy-Item -Recurse docs "$env:PKG\docs"
-          # Smoke test: start the packaged app headless, open every RF window, grab screenshots, quit
-          $env:QT_QPA_PLATFORM = 'offscreen'; $env:KE9ESU_SHOTS = (Join-Path (Get-Location) 'shots')
-          $p = Start-Process -FilePath "$env:PKG\Coil64.exe" -WorkingDirectory $env:PKG -PassThru
+          # Smoke test on a copy of the package (so no Coil64.ini / session state lands in the artifact):
+          # start the app, open every RF window, grab screenshots and build-sheet PDFs, quit
+          Copy-Item -Recurse $env:PKG smoke
+          # native 'windows' platform (the runner has a desktop session); 'offscreen' on Windows has no fonts
+          $env:KE9ESU_SHOTS = (Join-Path (Get-Location) 'shots')
+          $p = Start-Process -FilePath "smoke\Coil64.exe" -WorkingDirectory smoke -PassThru
           if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "Coil64 smoke run did not finish" }
-          Remove-Item Env:QT_QPA_PLATFORM, Env:KE9ESU_SHOTS
+          Remove-Item Env:KE9ESU_SHOTS
           Get-ChildItem shots | Format-Table Name, Length
           if ((Get-ChildItem shots -Filter *.png).Count -lt 10) { throw "smoke run produced too few screenshots" }
-          Remove-Item -Force "$env:PKG\Coil64.conf" -ErrorAction SilentlyContinue
+          if ((Get-ChildItem shots -Filter *_sheet.pdf).Count -lt 6) { throw "smoke run produced too few build-sheet PDFs" }
+          if (Test-Path "$env:PKG\Coil64.ini") { throw "settings file leaked into the package" }
           Compress-Archive -Path "$env:PKG\*" -DestinationPath "$env:PKG.zip" -Force
           Get-ChildItem $env:PKG -Recurse -File | Format-Table FullName, Length -AutoSize
           Get-Item "$env:PKG.zip" | Format-Table Name, Length
