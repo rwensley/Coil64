@@ -1,6 +1,6 @@
 # KE9ESU fork of Coil64 - automated Windows build (Qt 5.15.2 / MinGW 8.1, 64-bit)
 # Coil64 (c) Valery Kustarev, GPL-3.0-or-later. This workflow only builds and packages; it does not publish releases.
-name: Windows build
+name: Windows build (+ Linux tests)
 
 on:
   push:
@@ -47,6 +47,16 @@ jobs:
           qmake ..\Coil64.pro CONFIG+=release CONFIG-=debug_and_release
           mingw32-make -j4
 
+      - name: Build and run the KE9ESU core tests (ported designer/combiner tests + golden diffs vs the JS)
+        shell: cmd
+        run: |
+          mkdir build-tests
+          cd build-tests
+          qmake ..\tests\ke9esu\ke9esu_tests.pro CONFIG+=release CONFIG-=debug_and_release
+          mingw32-make -j4
+          for /r %%f in (ke9esu_tests.exe) do if exist "%%f" set TESTEXE=%%f
+          "%TESTEXE%" ..\tests\ke9esu
+
       - name: Package (windeployqt + Data folder)
         shell: pwsh
         run: |
@@ -78,6 +88,14 @@ jobs:
           Copy-Item -Recurse data "$env:PKG\Data"
           Copy-Item LICENSE, README.md, README_KE9ESU.md "$env:PKG\"
           Copy-Item -Recurse docs "$env:PKG\docs"
+          # Smoke test: start the packaged app headless, open every RF window, grab screenshots, quit
+          $env:QT_QPA_PLATFORM = 'offscreen'; $env:KE9ESU_SHOTS = (Join-Path (Get-Location) 'shots')
+          $p = Start-Process -FilePath "$env:PKG\Coil64.exe" -WorkingDirectory $env:PKG -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "Coil64 smoke run did not finish" }
+          Remove-Item Env:QT_QPA_PLATFORM, Env:KE9ESU_SHOTS
+          Get-ChildItem shots | Format-Table Name, Length
+          if ((Get-ChildItem shots -Filter *.png).Count -lt 10) { throw "smoke run produced too few screenshots" }
+          Remove-Item -Force "$env:PKG\Coil64.conf" -ErrorAction SilentlyContinue
           Compress-Archive -Path "$env:PKG\*" -DestinationPath "$env:PKG.zip" -Force
           Get-ChildItem $env:PKG -Recurse -File | Format-Table FullName, Length -AutoSize
           Get-Item "$env:PKG.zip" | Format-Table Name, Length
@@ -89,4 +107,50 @@ jobs:
           name: Coil64-KE9ESU-win64
           path: Coil64-KE9ESU-win64/
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload smoke-run screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coil64-KE9ESU-win64-screenshots
+          path: shots/
+          retention-days: 30
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 5.15.2 (gcc_64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: linux
+          target: desktop
+          arch: gcc_64
+          cache: true
+
+      - name: Build and run the KE9ESU core tests
+        run: |
+          mkdir build-tests && cd build-tests
+          qmake ../tests/ke9esu/ke9esu_tests.pro CONFIG+=release
+          make -j"$(nproc)"
+          ./ke9esu_tests ../tests/ke9esu
+
+      - name: Build Coil64 and run it headless (opens every RF window, writes screenshots)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libgl1-mesa-dev libxkbcommon-x11-0 >/dev/null
+          mkdir build && cd build
+          qmake ../Coil64.pro CONFIG+=release
+          make -j"$(nproc)"
+          QT_QPA_PLATFORM=offscreen KE9ESU_SHOTS="$GITHUB_WORKSPACE/shots-linux" HOME="$RUNNER_TEMP/home" timeout 180 ./Coil64
+          ls -la "$GITHUB_WORKSPACE/shots-linux"
+          test "$(ls "$GITHUB_WORKSPACE"/shots-linux/*.png | wc -l)" -ge 10
+
+      - name: Upload Linux screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coil64-KE9ESU-linux-screenshots
+          path: shots-linux/
           retention-days: 30

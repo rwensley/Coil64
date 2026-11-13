@@ -16,6 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses
 */
 
 #include "mainwindow.h"
+#include "ke9esu/ui/bridge.h"
 #include "ui_mainwindow.h"
 #include "resolve_q.h"
 
@@ -385,6 +386,7 @@ MainWindow::MainWindow(QWidget *parent) :
     }
     if(myOpt->styleGUI == _DarkStyle)
         invertGUIconColor();
+    ke9esuBridge = new ke9esu::Bridge(this); // KE9ESU: RF transformers & traps menu, shared RF project, value links
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 MainWindow::~MainWindow()
@@ -789,6 +791,7 @@ void MainWindow::invertGUIconColor()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void MainWindow::showOutput(QString caption, QString image, QString input, QString result)
 {
+    if (ke9esuBridge) ke9esuBridge->captureOutput(result); // KE9ESU: share Coil64 results with the RF windows
     QTextCursor c = mui->textBrowser->textCursor();
     if(myOpt->isLastShowingFirst)
         c.movePosition(QTextCursor::Start);

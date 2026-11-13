@@ -22,6 +22,8 @@
 #include "combiner_core.h"
 #include "serialize.h"
 #include "ke9esu_util.h"
+#include "project.h"
+#include <QTemporaryDir>
 
 using namespace ke9esu;
 static int g_pass = 0, g_fail = 0;
@@ -528,6 +530,45 @@ static void goldenTests(const QString &dir)
     });
 }
 
+
+/* ---- shared RF project (the object that links the windows and the Coil64 main window) */
+static void projectTests()
+{
+    t("project: values carry their source window, change signal, num()", [] {
+        Project *p = Project::instance(); int n = 0; QString lastSrc;
+        QObject ctx; QObject::connect(p, &Project::changed, &ctx, [&](const QString &, const QString &s) { n++; lastSrc = s; });
+        p->set(Key::L, 34.4, Win::Balun); p->set(Key::L, 34.4, Win::Balun);   // unchanged: one signal
+        REQ1(n == 1 && lastSrc == Win::Balun && p->num(Key::L) == 34.4 && p->source(Key::L) == Win::Balun);
+        p->set(Key::F, 7.05, Win::Coil64Lc); REQ1(p->source(Key::F) == Win::Coil64Lc && n == 2);
+    });
+    t("project: JSON save/open round trip (shared values, sources, window states)", [] {
+        Project *p = Project::instance();
+        p->set(Key::Core, "FT240-43", Win::CoreDb); p->set(Key::Stack, 2, Win::CoreDb); p->set(Key::Power, 100, Win::Project);
+        p->set(Key::Wire, QVariantMap{{"diaMM", 1.29}, {"odMM", 2.0}, {"label", "AWG 16 PTFE"}, {"id", "awg16t"}}, Win::Balun);
+        p->set(Key::ProblemBands, QStringList{"80m", "40m"}, Win::Eflw);
+        p->set(Key::Coil, QVariantMap{{"N", 10}, {"D", 25.0}, {"d", 1.0}, {"k", 1.1}, {"p", 1.5}, {"L", 2.5}, {"f", 7.1}}, Win::Coil64Coil);
+        QJsonObject st; st.insert("preset", "ke9esu"); p->setState(Win::Balun, st);
+        QTemporaryDir td; REQ1(td.isValid()); QString path = td.path() + "/t.rfproj.json"; QString e;
+        REQ(p->saveFile(path, &e), e);
+        p->set(Key::Core, "FT140-43", Win::Balun); p->set(Key::L, 1, Win::Lc); p->setState(Win::Balun, QJsonObject());
+        REQ(p->openFile(path, &e), e);
+        REQ1(p->get(Key::Core).toString() == "FT240-43" && p->source(Key::Core) == Win::CoreDb && p->num(Key::Stack) == 2 && p->num(Key::Power) == 100);
+        REQ1(p->get(Key::Wire).toMap().value("diaMM").toDouble() == 1.29 && p->get(Key::Wire).toMap().value("id").toString() == "awg16t");
+        REQ1(p->get(Key::ProblemBands).toStringList() == QStringList({"80m", "40m"}));
+        REQ1(p->get(Key::Coil).toMap().value("L").toDouble() == 2.5 && p->source(Key::Coil) == Win::Coil64Coil);
+        REQ1(p->state(Win::Balun).value("preset").toString() == "ke9esu");
+        QFile f(path); REQ1(f.open(QIODevice::ReadOnly)); QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+        REQ1(o.value("format").toString() == "KE9ESU Coil64 RF project" && o.contains("shared") && o.contains("windows"));
+        REQ1(!p->openFile(td.path() + "/missing.json", &e) && !e.isEmpty());
+    });
+    t("project: units follow Coil64 Preferences (mm / cm / in / mil)", [] {
+        Project *p = Project::instance(); Project::Units u; u.len = "in"; u.lenMul = 25.4; p->setUnits(u);
+        REQ1(p->toDispLen(25.4) == 1 && p->fromDispLen(2) == 50.8 && p->lenUnit() == "in");
+        u.len = "mil"; u.lenMul = 0.0254; p->setUnits(u); REQ1(std::fabs(p->toDispLen(1.29) - 50.787) < 1e-3);
+        u.len = "mm"; u.lenMul = 1; p->setUnits(u); REQ1(p->toDispLen(12.7) == 12.7);
+    });
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -535,6 +576,7 @@ int main(int argc, char **argv)
     QString dir = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QString(KE9ESU_TEST_DIR);
     portedDesignerTests();
     portedCombinerTests();
+    projectTests();
     goldenTests(dir);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("Failed: %s\n", g_failed.join("; ").toUtf8().constData());

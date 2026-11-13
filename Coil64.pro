@@ -149,6 +149,7 @@ TRANSLATIONS += lang/Coil64_bg.ts \
     lang/Coil64_tw.ts
 
 RESOURCES += res.qrc
+include(ke9esu/ke9esu_ui.pri) # KE9ESU: RF transformers & traps
 QMAKE_CXXFLAGS += -Wno-deprecated-declarations
 
 win32:{

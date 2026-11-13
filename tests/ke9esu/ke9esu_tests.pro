@@ -4,5 +4,7 @@ CONFIG += console c++17
 CONFIG -= app_bundle
 TARGET = ke9esu_tests
 include(../../ke9esu/ke9esu.pri)
-SOURCES += tst_ke9esu.cpp
+INCLUDEPATH += ../../ke9esu/ui
+HEADERS += ../../ke9esu/ui/project.h
+SOURCES += tst_ke9esu.cpp ../../ke9esu/ui/project.cpp
 DEFINES += KE9ESU_TEST_DIR=\\\"$$PWD\\\"

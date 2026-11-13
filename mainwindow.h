@@ -72,8 +72,10 @@ namespace Ui {
 class MainWindow;
 }
 
+namespace ke9esu { class Bridge; }
 class MainWindow : public QMainWindow
 {
+    friend class ke9esu::Bridge; // KE9ESU: RF transformers & traps integration
     Q_OBJECT
 
 public:
@@ -261,6 +263,7 @@ private:
     SaturationDockWidget *satCurrentDockWidget;
     MThread_calculate *thread;
     QTimer *timer;
+    ke9esu::Bridge *ke9esuBridge = nullptr; // KE9ESU
 };
 
 #endif // MAINWINDOW_H
