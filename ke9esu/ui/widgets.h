@@ -168,6 +168,7 @@ class Ke9esuDialog : public QDialog
 public:
     Ke9esuDialog(const QString &window, QWidget *parent = nullptr);
     QString window() const { return m_window; }
+    bool exportSheetPdf(const QString &path) const { return SheetDialog::savePdf(sheetHtml(), sheetImages(), path); }
     virtual QJsonObject saveState() const = 0;
     virtual void loadState(const QJsonObject &o) = 0;
     virtual void pullKey(const QString &key) { Q_UNUSED(key) }     // take a shared value (shows "from <window>")

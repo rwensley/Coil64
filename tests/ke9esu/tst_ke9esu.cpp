@@ -348,8 +348,10 @@ static void portedCombinerTests()
     t("combiner: fewest parts preferred among equal error", [] {
         auto r = cc::solve(P('R', 4700, "E12", 6, "mixed")); REQ1(cc::sortResults(r.results, "accuracy", 1)[0].count == 1 && cc::sortResults(r.results, "simple", 1)[0].count == 1);
     });
-    for (const char *ser : {"E12", "E24", "E96", "E192"}) t(QString("combiner: 6-part speed ") + ser, [ser] { auto r = cc::solve(P('R', 1234, ser, 6, "mixed")); std::printf("      %lld ms\n", (long long)r.ms); REQ1(r.ms < 6000); });
-    t("combiner: 6-part caps E96 speed", [] { auto r = cc::solve(P('C', 1.234e-9, "E96", 6, "mixed")); std::printf("      %lld ms\n", (long long)r.ms); REQ1(r.ms < 6000); });
+    // The JS suite's 6 s budget; shared CI runners are slower, so CI may raise it with KE9ESU_SPEED_LIMIT_MS.
+    static const qint64 lim = qEnvironmentVariableIsSet("KE9ESU_SPEED_LIMIT_MS") ? qEnvironmentVariable("KE9ESU_SPEED_LIMIT_MS").toLongLong() : 6000;
+    for (const char *ser : {"E12", "E24", "E96", "E192"}) t(QString("combiner: 6-part speed ") + ser, [ser] { auto r = cc::solve(P('R', 1234, ser, 6, "mixed")); std::printf("      %lld ms (limit %lld)\n", (long long)r.ms, (long long)lim); REQ1(r.ms < lim); });
+    t("combiner: 6-part caps E96 speed", [] { auto r = cc::solve(P('C', 1.234e-9, "E96", 6, "mixed")); std::printf("      %lld ms (limit %lld)\n", (long long)r.ms, (long long)lim); REQ1(r.ms < lim); });
     t("combiner: edge: target outside range still works", [] { auto b = best(P('R', 2e7, "E12", 2, "mixed")); REQ(std::fabs(b.err) < 1e-12, b.expr); });
 }
 

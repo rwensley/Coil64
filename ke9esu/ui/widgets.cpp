@@ -1,5 +1,6 @@
 /* widgets.cpp - see widgets.h. Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. */
 #include "widgets.h"
+#include <QRegularExpression>
 #include "project.h"
 #include "ke9esu_util.h"
 #include "system_functions.h"
@@ -273,12 +274,19 @@ QString stepsHtml(const QStringList &steps)
 {
     QString h = "<ol>"; for (const QString &s : steps) h += "<li>" + esc(s) + "</li>"; return h + "</ol>";
 }
+// QTextDocument shrinks <h1>/<h2> with a pt size when printed at high resolution; use styled paragraphs instead
+static QString printable(QString h)
+{
+    h.replace("<h1>", "<p style='font-size:15pt;font-weight:bold;margin-top:0;margin-bottom:4px;'>").replace("</h1>", "</p>");
+    h.replace("<h2>", "<p style='font-size:12pt;font-weight:bold;margin-top:10px;margin-bottom:4px;'>").replace("</h2>", "</p>");
+    return h;
+}
 static void addImages(QTextDocument *doc, const QMap<QString, QImage> &images)
 {
     for (auto it = images.constBegin(); it != images.constEnd(); ++it) doc->addResource(QTextDocument::ImageResource, QUrl("ke9esu://" + it.key()), it.value());
 }
 SheetDialog::SheetDialog(const QString &title, const QString &html, const QMap<QString, QImage> &images, QWidget *parent)
-    : QDialog(parent), m_html(html), m_title(title), m_images(images)
+    : QDialog(parent), m_html(printable(html)), m_title(title), m_images(images)
 {
     setWindowTitle(tr("Build sheet") + " - " + title); resize(820, 900); setAttribute(Qt::WA_DeleteOnClose);
     QVBoxLayout *v = new QVBoxLayout(this);
@@ -293,7 +301,7 @@ SheetDialog::SheetDialog(const QString &title, const QString &html, const QMap<Q
         QTextDocument doc; addImages(&doc, m_images); doc.setHtml(m_html); doc.print(&printer);
     });
     connect(pdf, &QPushButton::clicked, this, [this] {
-        QString name = m_title; name.replace(QRegExp("[^A-Za-z0-9._-]+"), "_");
+        QString name = m_title; name.replace(QRegularExpression("[^A-Za-z0-9._-]+"), "_");
         QString path = QFileDialog::getSaveFileName(this, tr("Save build sheet as PDF"), defineSavePath() + "/" + name + ".pdf", "PDF (*.pdf)");
         if (path.isEmpty()) return;
         if (!savePdf(m_html, m_images, path)) QMessageBox::warning(this, tr("Build sheet"), tr("Could not write %1").arg(path));
@@ -303,7 +311,7 @@ bool SheetDialog::savePdf(const QString &html, const QMap<QString, QImage> &imag
 {
     QPrinter printer(QPrinter::HighResolution); printer.setOutputFormat(QPrinter::PdfFormat); printer.setOutputFileName(path);
     printer.setPageSize(QPageSize(QPageSize::Letter)); printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout::Millimeter);
-    QTextDocument doc; addImages(&doc, images); doc.setHtml(html); doc.print(&printer);
+    QTextDocument doc; addImages(&doc, images); doc.setHtml(printable(html)); doc.print(&printer);
     return QFile::exists(path);
 }
 

@@ -55,6 +55,8 @@ jobs:
           qmake ..\tests\ke9esu\ke9esu_tests.pro CONFIG+=release CONFIG-=debug_and_release
           mingw32-make -j4
           for /r %%f in (ke9esu_tests.exe) do if exist "%%f" set TESTEXE=%%f
+          rem shared runners are ~2x slower than a desktop; the combiner's 6-part searches get 20 s instead of 6 s
+          set KE9ESU_SPEED_LIMIT_MS=20000
           "%TESTEXE%" ..\tests\ke9esu
 
       - name: Package (windeployqt + Data folder)
@@ -136,7 +138,7 @@ jobs:
           mkdir build-tests && cd build-tests
           qmake ../tests/ke9esu/ke9esu_tests.pro CONFIG+=release
           make -j"$(nproc)"
-          ./ke9esu_tests ../tests/ke9esu
+          KE9ESU_SPEED_LIMIT_MS=20000 ./ke9esu_tests ../tests/ke9esu
 
       - name: Build Coil64 and run it headless (opens every RF window, writes screenshots)
         run: |

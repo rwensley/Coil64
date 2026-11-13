@@ -281,7 +281,9 @@ void Bridge::screenshots(const QString &dir)
         if (CombinerDialog *c = qobject_cast<CombinerDialog *>(d)) c->runSync();
         for (int k = 0; k < 5; k++) { QApplication::processEvents(); }
         QString fn = QString("%1_%2").arg(i++, 2, 10, QChar('0')).arg(QString(w).replace(QRegularExpression("[^A-Za-z0-9]+"), "_"));
-        grab(d, fn); d->close();
+        grab(d, fn);
+        if (!d->exportSheetPdf(dir + "/" + fn + "_sheet.pdf")) qWarning("KE9ESU shots: build sheet PDF failed for %s", qPrintable(w));
+        d->close();
     }
     // linked flows
     BalunDialog *b = qobject_cast<BalunDialog *>(openWindow(Win::Balun)); if (b) { b->applyPreset("ke9esu-auto91"); grab(b, "20_balun_auto91"); b->applyPreset("ke9esu-choke"); grab(b, "21_balun_choke"); b->applyPreset("ke9esu"); b->close(); }
