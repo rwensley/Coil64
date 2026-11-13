@@ -1,5 +1,5 @@
 /* tst_ke9esu.cpp - KE9ESU fork of Coil64: tests for the RF transformer / trap / long-wire / component-combiner cores.
-   1) every test of the KE9ESU web app's test.js (v1.3.2) and the Component Combiner's test.js, ported with the same
+   1) every test of the KE9ESU web app's test.js (v1.3.3) and the Component Combiner's test.js, ported with the same
       published reference values (G4AON, Fair-Rite, K9YC, DG1JAN, G3TXQ, Amidon, K7MEM, VE6YP, W4ULD, W8JI, Cromwell ...);
    2) a differential "golden" test: golden.json / golden_cc.json were produced by the JavaScript originals
       (ke9esu/tools/gen_golden*.js) and every number, check, step and parts-list text must match the C++ port.
@@ -268,6 +268,37 @@ static void portedDesignerTests()
         BalunInput w = b; w.capMode = "custom"; w.capPF = 100; DesignResult dw = design(w); const Check *ce = findCheck(dw.checks, "capEffect");
         REQ1(dw.sweep.band.maxSwr > d.sweep.band.maxSwr && ce && ce->status == "warn");
     });
+    t("E-series tolerance wording identical in every window (combiner, LC trap, shunt C, Coil64 LC tank / bandspread)", [&] {
+        const char *ser[] = {"E6", "E12", "E24", "E48", "E96", "E192"};
+        const char *lab[] = {"E6 (20%)", "E12 (10%)", "E24 (5%)", "E48 (2%)", "E96 (1%)", "E192 (0.5% / 0.25% / 0.1%)"};
+        for (int k = 0; k < 6; k++) { REQ(eSeriesLabel(ser[k]) == lab[k] && eSeriesLabel(ser[k]) == cc::seriesLabel(ser[k]) && eSeriesHint(ser[k]) == cc::seriesHint(ser[k]), ser[k]); }
+        REQ1(eSeriesLabel("none") == "none" && eSeriesHint("none").isEmpty() && eSeriesTolPct("E192") == 0.5 && eSeriesTolPct("x") == 0);
+        REQ1(pctSigned(3.81) == "+3.8 %" && pctSigned(-0.04) == "0.0 %" && pctSigned(-4.66) == S("−4.7 %"));
+        SnapInfo sn = snapInfo("E12", 96.3, 100, 7); REQ1(near(sn.errPct, 3.8421, 1e-4) && near(sn.fLoMHz, 7 / std::sqrt(1.1), 1e-12) && near(sn.fHiMHz, 7 / std::sqrt(0.9), 1e-12));
+        REQ(spreadTxt(sn) == S("6.674–7.379 MHz (−4.7 % … +5.4 %)"), spreadTxt(sn));
+        QString n = snapNote("E24", 98.2, 100, 7.0); REQ(n.startsWith("E24 (5%) standard value (snap error +1.8 %); parts in this series are typically ±5%") && n.contains(S("→ resonance")), n);
+        REQ1(!snapNote("E24", 98.2, 100).contains("resonance") && snapNote("E24", 0, 100).isEmpty());
+    });
+    t("LC trap snap: series label in the list, snap error, tolerance spread, parts; toroid detune; C given; exact", [&] {
+        LcTrapInput D;
+        for (auto sp : {qMakePair(QString("E6"), 20.0), qMakePair(QString("E12"), 10.0), qMakePair(QString("E24"), 5.0)}) {
+            LcTrapInput i = D; i.snap = sp.first; LcTrapResult r = lcTrap(i); const SnapInfo &sn = r.snap;
+            REQ(r.hasSnap && sn.tolPct == sp.second && sn.label == eSeriesLabel(sp.first) && near(sn.fMHz, D.fMHz, 1e-12) && sn.fLoMHz < D.fMHz && sn.fHiMHz > D.fMHz, sp.first);
+            const Check *c = findCheck(r.checks, "cap"), *tl = findCheck(r.checks, "tol");
+            REQ(c && c->text.contains(sn.label + " value; exact ") && tl && tl->text.contains(sn.hint) && tl->text.contains(spreadTxt(sn)), sp.first);
+            REQ(r.parts[0].item.contains(QString(" pF ±%1% (%2)").arg(sp.second).arg(sp.first)), r.parts[0].item);
+        }
+        LcTrapInput t1 = D; t1.coreType = "toroid"; t1.coreId = "T200-2"; LcTrapResult tr = lcTrap(t1);
+        REQ1(tr.hasSnap && near(tr.snap.fMHz, D.fMHz * std::sqrt(tr.cNeedPF / tr.C_pF), 1e-12) && findCheck(tr.checks, "toroid")->text.contains("the E12 (10%) part is"));
+        LcTrapInput g = D; g.mode = "C"; g.cPF = 100; g.snap = "E24"; LcTrapResult gr = lcTrap(g);
+        REQ1(!gr.hasSnap && findCheck(gr.checks, "tol") && findCheck(gr.checks, "tol")->text.startsWith("Snap to E24 (5%) not applied"));
+        LcTrapInput e = D; e.snap = "none"; LcTrapResult er = lcTrap(e); REQ1(!er.hasSnap && !findCheck(er.checks, "tol") && !er.parts[0].item.contains(QChar(0x00B1)));
+    });
+    t("shunt C suggestion and sweep optimum name their E12 (10%) series and snap error", [&] {
+        CompCap cs = compensationCap(29.7, 100, 2, 50); REQ1(cs.series == "E12" && cs.seriesLabel == "E12 (10%)" && near(cs.snapErrPct, (cs.pF - cs.pFcalc) / cs.pFcalc * 100, 1e-12));
+        DesignResult d = design(presetInput("efhw49-40")); REQ1(findCheck(d.checks, "cap")->text.contains("suggestion 100 pF E12 (10%), calc "));
+        const CapOpt &o = d.sweep.opt; REQ1(std::find(CAP_STD_PF.begin(), CAP_STD_PF.end(), o.stdPF) != CAP_STD_PF.end() && near(o.stdErrPct, (o.stdPF - o.pF) / o.pF * 100, 1e-12));
+    });
     t("shunt C / sweep inputs normalise and survive the JSON round trip", [&] {
         BalunInput i; i.topology = "efhw49"; i.capMode = "bogus"; i.capPF = -5; i.capRatingV = 1e9; i.sweepPoints = 3; i.sweepScale = "x"; i.sweepLoadMode = "y"; i.sweepK = 2; i.sweepZ0 = 5;
         BalunInput n = normalize(i); REQ1(n.capMode == "suggested" && n.capPF == 0 && n.capRatingV == 50000 && n.sweepPoints == 11 && n.sweepScale == "log" && n.sweepLoadMode == "single" && n.sweepK == 1 && n.sweepZ0 == 10);
@@ -505,6 +536,10 @@ static void goldenTests(const QString &dir)
                 double vals[] = {c.pF, c.suggestedPF, c.pFcalc, c.rangePF[0], c.rangePF[1], c.vPeak, c.needV, c.minRatingV, c.ratingV};
                 for (int k = 0; k < 9; k++) D.num(w + " cap[" + QString::number(k + 1) + "]", a[k + 1], vals[k]);
                 D.n++; if (a[10].toBool() != c.ratingOk) D.err(w + " cap ratingOk", "", ""); D.num(w + " cap I", a[11], c.iRmsA); D.num(w + " cap kvar", a[12], c.kvar); D.num(w + " cap f", a[13], c.iAtMHz); }
+            { QJsonArray cs = o["capSer"].toArray();   // v1.3.3: E12 (10%) label and snap error of the suggestion
+              if (cs[0].isArray() != d.hasCompCap || cs[1].isArray() != d.hasCapSuggestion) D.err(w + " capSer present", "", "");
+              if (d.hasCompCap) { D.str(w + " cap series", cs[0].toArray()[0], d.compCap.seriesLabel); D.num(w + " cap snapErr", cs[0].toArray()[1], d.compCap.snapErrPct, 1e-9); }
+              if (d.hasCapSuggestion) { D.str(w + " capSug series", cs[1].toArray()[0], d.capSuggestion.seriesLabel); D.num(w + " capSug snapErr", cs[1].toArray()[1], d.capSuggestion.snapErrPct, 1e-9); } }
             if (o["capSug"].isNull() == d.hasCapSuggestion) D.err(w + " capSug present", "", "");
             else if (d.hasCapSuggestion) { QJsonArray a = o["capSug"].toArray(); const CompCap &c = d.capSuggestion; double vals[] = {c.pF, c.pFcalc, c.rangePF[0], c.rangePF[1], c.vPeak, c.needV, c.ratingV};
                 for (int k = 0; k < 7; k++) D.num(w + " capSug[" + QString::number(k) + "]", a[k], vals[k]); }
@@ -528,6 +563,7 @@ static void goldenTests(const QString &dir)
                 else for (int j = 0; j < ra.size(); j++) { QJsonArray a = ra[j].toArray(); D.str(w + " readout band", a[0], S.readout[j].band); P(w + " readout " + S.readout[j].band, a, 1, S.readout[j]); }
                 QJsonArray oa = so["opt"].toArray(); const CapOpt &op = S.opt; double ov[] = {op.pF, op.maxSwr, op.meanSwr, op.atMHz, op.stdPF, op.offMaxSwr, op.offMeanSwr, (double)op.points};
                 for (int k = 0; k < 8; k++) D.num(w + " opt[" + QString::number(k) + "]", oa[k], ov[k], 1e-7);
+                D.num(w + " opt stdErr", so["optStdErr"], op.stdErrPct, 1e-7);
             }
             QJsonArray pf = o["perFreq"].toArray();
             if (pf.size() != (int)d.perFreq.size()) D.err(w + " perFreq count", QString::number(pf.size()), QString::number(d.perFreq.size()));
@@ -552,11 +588,11 @@ static void goldenTests(const QString &dir)
         }
         D.done();
     });
-    t("golden: LC traps - 58 cases (air coil and toroid)", [&] {
+    t("golden: LC traps - 62 cases (air coil and toroid, E6/E12/E24 snap info)", [&] {
         Diff D;
         for (auto v : g["lc"].toArray()) {
             QJsonObject o = v.toObject(); LcTrapResult r = lcTrap(lcInputFromJson(o["input"].toObject())); QString w = inputTag(o["input"].toObject());
-            QList<QPair<const char *, double>> f = {{"L", r.L_uH}, {"C", r.C_pF}, {"cIdeal", r.cIdealPF}, {"X", r.X}, {"q", r.q}, {"qCoil", r.qCoil}, {"rp", r.rpOhm}, {"cap", r.capRatingV}, {"ic", r.capCurrentA},
+            QList<QPair<const char *, double>> f = {{"L", r.L_uH}, {"C", r.C_pF}, {"cIdeal", r.cIdealPF}, {"cNeed", r.cNeedPF}, {"fNom", r.fNomMHz}, {"X", r.X}, {"q", r.q}, {"qCoil", r.qCoil}, {"rp", r.rpOhm}, {"cap", r.capRatingV}, {"ic", r.capCurrentA},
                 {"pd", r.pdKeyW}, {"pdAvg", r.pdAvgW}, {"fcs", r.fWithCsMHz}};
             for (auto &x : f) D.num(w + " " + x.first, o[x.first], x.second, 1e-7);
             D.num(w + " vTrap.rms", o["vTrap"].toObject()["rms"], r.vTrap.rms);
@@ -564,6 +600,11 @@ static void goldenTests(const QString &dir)
                 double vals[] = {c.N, c.pitchMM, c.DkMM, c.lenMM, c.esr, c.uH, c.csPF, c.srfMHz, c.q, c.wheelerUH, c.nagaokaRosaUH, c.wireLenMM}; for (int k = 0; k < 12; k++) D.num(w + " coil[" + QString::number(k) + "]", a[k], vals[k], 1e-7); }
             if (o["toroid"].isArray() != r.hasToroid) D.err(w + " toroid?", "", ""); else if (r.hasToroid) { QJsonArray a = o["toroid"].toArray(); const LcToroid &c = r.toroid;
                 double vals[] = {(double)c.N, c.uH, c.qCore, c.qWire, c.wireLenMM, c.bGauss, c.limGauss, c.pCoreW, c.tempRiseC, c.coreTempC}; for (int k = 0; k < 10; k++) D.num(w + " toroid[" + QString::number(k) + "]", a[k], vals[k], 1e-7); }
+            if (o["snap"].isArray() != r.hasSnap) D.err(w + " snap?", o["snap"].isArray() ? "yes" : "no", r.hasSnap ? "yes" : "no");
+            else if (r.hasSnap) { QJsonArray a = o["snap"].toArray(); const SnapInfo &sn = r.snap;
+                QString sv[] = {sn.series, sn.label, QString(), sn.tolText, sn.hint}; for (int k : {0, 1, 3, 4}) D.str(w + " snap[" + QString::number(k) + "]", a[k], sv[k]);
+                double nv[] = {sn.tolPct, sn.exactPF, sn.pF, sn.errPct, sn.fMHz, sn.fLoMHz, sn.fHiMHz}; int ix[] = {2, 5, 6, 7, 8, 9, 10};
+                for (int k = 0; k < 7; k++) D.num(w + " snap[" + QString::number(ix[k]) + "]", a[ix[k]], nv[k], 1e-7); }
             D.bands(w, o["bands"].toArray(), r.bands); D.txt(w, o, r);
         }
         D.done();

@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses
 #include "ke9esu/ui/bridge.h"
 #include "ke9esu/ui/theme.h"
 #include "ke9esu/viewprefs.h"
+#include "ke9esu/trap_core.h"
 #include "ui_mainwindow.h"
 #include "resolve_q.h"
 
@@ -4745,6 +4746,8 @@ void MainWindow::on_pushButton_Calculate_clicked()
                 data->inductance = CalcLC1(data->capacitance, data->frequency);
                 tmpStr += formattedOutput(myOpt, tr("Circuit capacitance") + " C = ", roundTo(data->capacitance / myOpt->dwCapacityMultiplier, loc, myOpt->dwAccuracy),
                                           qApp->translate("Context", myOpt->ssCapacityMeasureUnit.toUtf8())) + "<br/>";
+                // KE9ESU: C is snapped to E24 here - say so, with the snap error and the resonance spread of ±5 % parts (L re-solved, so f is kept)
+                tmpStr += "<i>" + ke9esu::snapNote("E24", result.N, data->capacitance, data->frequency).toHtmlEscaped() + "</i><br/>";
                 tmpStr += formattedOutput(myOpt, tr("Inductance of a circuit") + " L = ", roundTo(data->inductance / myOpt->dwInductanceMultiplier, loc, myOpt->dwAccuracy),
                                           qApp->translate("Context", myOpt->ssInductanceMeasureUnit.toUtf8())) + "<br/>";
                 label1 = " Z: ";

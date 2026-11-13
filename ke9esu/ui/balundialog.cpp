@@ -1,5 +1,6 @@
 /* balundialog.cpp - see balundialog.h. Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. */
 #include "balundialog.h"
+#include "trap_core.h"
 #include "coreui.h"
 #include "diagram.h"
 #include "project.h"
@@ -320,7 +321,7 @@ void BalunDialog::recalc()
     m_cards->setCards(cards);
     m_checks->setChecks(d.checks);
     const CompCap &cc = d.compCap;
-    m_capNote->setText(d.hasCompCap ? S("<b>Low-side shunt capacitor:</b> ") + jsNum(cc.pF) + " pF (" + (cc.mode == "suggested" ? "suggested" : "custom") + "; suggestion " + jsNum(cc.suggestedPF) + " pF, calc " + f(cc.pFcalc, 0) + S(" pF; trim ") + jsNum(cc.rangePF[0]) + S("–") + jsNum(cc.rangePF[1]) +
+    m_capNote->setText(d.hasCompCap ? S("<b>Low-side shunt capacitor:</b> ") + jsNum(cc.pF) + " pF (" + (cc.mode == "suggested" ? "suggested" : "custom") + "; suggestion " + jsNum(cc.suggestedPF) + " pF " + cc.seriesLabel + ", calc " + f(cc.pFcalc, 0) + " pF, " + pctSigned(cc.snapErrPct) + S("; trim ") + jsNum(cc.rangePF[0]) + S("–") + jsNum(cc.rangePF[1]) +
                                          S(" pF on the analyser), rated ") + kvTxt(cc.ratingV) + S(" (needs ≥ ") + kvTxt(cc.minRatingV) + S(": input peak ≈ ") + rnd(cc.vPeak) + S(" V at worst-case SWR, ×5 margin); RF current up to ") + f(cc.iRmsA, 2) +
                                          S(" A RMS. Solder it across the SO-239, centre pin to shell, leads as short as possible.") : QString());
     m_capNote->setVisible(d.hasCompCap);
@@ -328,7 +329,7 @@ void BalunDialog::recalc()
     if (d.hasCapSuggestion) {
         const CompCap &cs = d.capSuggestion;
         if (inp.capMode == "suggested") { QSignalBlocker b(m_capPF); m_capPF->setValue(cs.pF); }
-        QString h = S("Suggested %1 pF (trim %2–%3 pF); needs ≥ %4 (%5 V = 5 × %6 V peak at %7 W / SWR %8:1); 10 kV typical for margin and doorknob / HV ceramic availability. Default: %9")
+        QString h = S("Suggested %1 pF ") + cs.seriesLabel + " (calc " + f(cs.pFcalc, 0) + " pF, " + pctSigned(cs.snapErrPct) + "; " + QString(eSeriesHint(cs.series)).replace("Parts in this series are typically", "parts typically") + S("; trim %2–%3 pF); needs ≥ %4 (%5 V = 5 × %6 V peak at %7 W / SWR %8:1); 10 kV typical for margin and doorknob / HV ceramic availability. Default: %9")
                         .arg(jsNum(cs.pF), jsNum(cs.rangePF[0]), jsNum(cs.rangePF[1]), kvTxt(cs.ratingV), rnd(cs.needV), rnd(cs.vPeak), jsNum(inp.powerW), jsNum(inp.vswr),
                              defaultCapMode(top.id) == "off" ? S("Off for the Ruthroff (transmission-line transformer).") : S("Suggested for tapped autotransformers."));
         if (d.hasCompCap && !cc.ratingOk) h = "<b style='color:" + sevColor("fail").name() + "'>FAIL: " + esc(kvTxt(cc.ratingV)) + S(" is below the ≥ ") + esc(kvTxt(cs.ratingV)) + " needed.</b> " + esc(h); else h = esc(h);
@@ -340,7 +341,7 @@ void BalunDialog::recalc()
         { QSignalBlocker b(m_capSlider); m_capSlider->setValue((int)std::min(330.0, d.hasCompCap ? cc.pF : 0.0)); }
         m_capSliderVal->setText(d.hasCompCap ? jsNum(cc.pF) + " pF" : tr("off"));
         m_swLoadMin->setEnabled(inp.sweepLoadMode == "range"); m_swLoadMax->setEnabled(inp.sweepLoadMode == "range");
-        m_swOpt->setText(QString("Optimum %1 pF (nearest standard %2 pF): worst %3:1 vs %4:1 with none%5.").arg(jsNum(sw.opt.pF), jsNum(sw.opt.stdPF), f(sw.opt.maxSwr, 2), f(sw.opt.offMaxSwr, 2), sw.band.has ? "; now " + f(sw.band.maxSwr, 2) + ":1" : QString()));
+        m_swOpt->setText(QString("Optimum %1 pF (nearest " + eSeriesLabel("E12") + " value %2 pF, " + pctSigned(sw.opt.stdErrPct) + "): worst %3:1 vs %4:1 with none%5.").arg(jsNum(sw.opt.pF), jsNum(sw.opt.stdPF), f(sw.opt.maxSwr, 2), f(sw.opt.offMaxSwr, 2), sw.band.has ? "; now " + f(sw.band.maxSwr, 2) + ":1" : QString()));
         m_swRead->setRowCount((int)sw.readout.size());
         for (int r = 0; r < (int)sw.readout.size(); r++) { const SweepPoint &q = sw.readout[r];
             QStringList v = {q.band, f(q.fMHz, 3), f(q.r, 1) + S(" Ω"), (q.x <= -0.05 ? S("−") : std::fabs(q.x) < 0.05 ? QString() : QString("+")) + f(std::fabs(q.x), 1) + S(" Ω"), f(q.swr, 2) + ":1", f(q.rlDb, 1) + " dB", f(q.effPct, 1) + " %"};
@@ -473,8 +474,8 @@ QString BalunDialog::sheetHtml() const
         {"Frequency", jsNum(inp.fMinMHz) + S("–") + jsNum(inp.fMaxMHz) + " MHz (" + bl.join(" ") + ")"},
         {"Inductance", f(d.lNom, 2) + S(" µH (") + f(d.lMin, 2) + S("–") + f(d.lMax, 2) + " with AL tolerance)" + (!std::isnan(d.lFullUH) ? "; full winding " + f(d.lFullUH, 1) + S(" µH; high side ≈ ") + rnd(d.vHighRms) + " V RMS" : QString())},
         {"Loss / temp", f(d.lossAvgW, 2) + " W avg, " + rnd(d.lossDensity_mWcm3) + S(" mW/cm³, core ≈ ") + rnd(d.coreTempC) + S(" °C")}};
-    if (d.hasCompCap) rows << qMakePair(QString("Low-side shunt C"), jsNum(d.compCap.pF) + " pF (" + d.compCap.mode + "), " + kvTxt(d.compCap.ratingV) + S(" rated (needs ≥ ") + kvTxt(d.compCap.minRatingV) + S("), SO-239 centre → shell (trim ") + jsNum(d.compCap.rangePF[0]) + S("–") + jsNum(d.compCap.rangePF[1]) + " pF)" + (d.compCap.ratingOk ? QString() : S(" — FAIL: rating below need")));
-    else if (d.hasCapSuggestion) rows << qMakePair(QString("Low-side shunt C"), "off (suggestion " + jsNum(d.capSuggestion.pF) + " pF; sweep optimum " + jsNum(d.sweep.opt.pF) + " pF)");
+    if (d.hasCompCap) rows << qMakePair(QString("Low-side shunt C"), jsNum(d.compCap.pF) + " pF (" + d.compCap.mode + (d.compCap.mode == "suggested" ? ", " + d.compCap.seriesLabel : QString()) + "), " + kvTxt(d.compCap.ratingV) + S(" rated (needs ≥ ") + kvTxt(d.compCap.minRatingV) + S("), SO-239 centre → shell (trim ") + jsNum(d.compCap.rangePF[0]) + S("–") + jsNum(d.compCap.rangePF[1]) + " pF)" + (d.compCap.ratingOk ? QString() : S(" — FAIL: rating below need")));
+    else if (d.hasCapSuggestion) rows << qMakePair(QString("Low-side shunt C"), "off (suggestion " + jsNum(d.capSuggestion.pF) + " pF " + d.capSuggestion.seriesLabel + "; sweep optimum " + jsNum(d.sweep.opt.pF) + " pF, nearest " + eSeriesLabel("E12") + " " + jsNum(d.sweep.opt.stdPF) + " pF)");
     if (d.hasSweep && d.sweep.band.has) rows << qMakePair(QString("Modelled SWR"), "worst " + f(d.sweep.band.maxSwr, 2) + ":1 @ " + f(d.sweep.band.atMHz, 2) + S(" MHz into ") + rnd(d.sweep.model.loadOhm) + S(" Ω (") + d.sweep.model.kind + " model; optimum shunt C " + jsNum(d.sweep.opt.pF) + S(" pF → ") + f(d.sweep.opt.maxSwr, 2) + ":1)");
     QString h = "<html><head>" + sheetCss() + "</head><body><h1>" + esc(S("KE9ESU build sheet — ") + d.topology.name) + "</h1><div class='hint'>" + esc(QDate::currentDate().toString(Qt::ISODate)) +
                 S(" · Coil64 KE9ESU — RF transformers &amp; traps · estimates only — confirm with an antenna analyser</div>");

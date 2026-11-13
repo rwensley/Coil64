@@ -232,7 +232,8 @@ LcTrapDialog::LcTrapDialog(QWidget *parent) : Ke9esuDialog(Win::Lc, parent)
     m_mode = new QComboBox; m_mode->addItem(tr("Choose reactance X"), "X"); m_mode->addItem(tr("Choose inductance L"), "L"); m_mode->addItem(tr("Choose capacitance C"), "C");
     m_x = dsp(10, 2000, 200, 0, S(" Ω")); m_l = dsp(0.05, 500, 5, 3, S(" µH")); m_c = dsp(1, 20000, 100, 1, " pF");
     m_lMark = new FromMarker; m_cMark = new FromMarker;
-    m_snap = new QComboBox; m_snap->addItem(tr("exact C"), "none"); m_snap->addItem("E6", "E6"); m_snap->addItem("E12", "E12"); m_snap->addItem("E24", "E24");
+    m_snap = new QComboBox; m_snap->addItem(tr("exact C"), "none"); for (const char *sn : {"E6", "E12", "E24"}) m_snap->addItem(eSeriesLabel(sn), sn);   // "E12 (10%)" like the combiner
+    m_snapHint = new QLabel; m_snapHint->setObjectName("ke9esuHint"); m_snapHint->setWordWrap(true);
     m_coreType = new QComboBox; m_coreType->addItem(tr("Air-core coil"), "air"); m_coreType->addItem(tr("Toroid"), "toroid");
     m_form = new QComboBox; for (const PvcForm &p : pvcForms()) m_form->addItem(p.label, p.id); m_form->addItem(tr("Custom form"), "custom");
     m_dia = new LenSpin(3, 300, 48.26); m_wire = new QComboBox; m_wireMark = new FromMarker; m_pitch = new LenSpin(0, 50, 0); m_pitch->setSpecialValueText(tr("auto"));
@@ -243,7 +244,7 @@ LcTrapDialog::LcTrapDialog(QWidget *parent) : Ke9esuDialog(Win::Lc, parent)
     m_proj = new ProjectBox(Win::Lc, ProjectBox::Power | ProjectBox::ZEnd | ProjectBox::Duty | ProjectBox::Ambient);
     fl->addRow(tr("Trap frequency"), m_f); fl->addRow(m_req);
     fl->addRow(tr("Design from"), m_mode); fl->addRow(tr("Reactance X"), m_x); fl->addRow(tr("Inductance L"), row({m_l, m_lMark})); fl->addRow(tr("Capacitance C"), row({m_c, m_cMark}));
-    fl->addRow(tr("Snap C to"), m_snap); fl->addRow(tr("Inductor"), m_coreType);
+    fl->addRow(tr("Snap C to"), m_snap); fl->addRow(QString(), m_snapHint); fl->addRow(tr("Inductor"), m_coreType);
     m_air = new QWidget; QFormLayout *af = new QFormLayout(m_air); af->setContentsMargins(0, 0, 0, 0);
     af->addRow(tr("Coil form"), m_form); af->addRow(tr("Form diameter"), m_dia); af->addRow(tr("Wire"), row({m_wire, m_wireMark})); af->addRow(tr("Pitch"), m_pitch);
     m_tor = new QWidget; QFormLayout *tf = new QFormLayout(m_tor); tf->setContentsMargins(0, 0, 0, 0); tf->addRow(tr("Core"), m_core); tf->addRow(QString(), m_core->marker()); tf->addRow(tr("Stack"), m_stack);
@@ -318,8 +319,11 @@ void LcTrapDialog::recalc()
     QString mode = m_mode->currentData().toString(); bool tor = m_coreType->currentData() == "toroid";
     m_x->setEnabled(mode == "X"); m_l->setEnabled(mode == "L"); m_c->setEnabled(mode == "C"); m_air->setVisible(!tor); m_tor->setVisible(tor);
     m_r = lcTrap(input()); const LcTrapResult &r = m_r; const LcTrapInput &i = r.input;
-    QString cLab = "C" + (std::fabs(r.C_pF - r.cIdealPF) > 0.05 ? (tor && i.snap == "none" ? QString(" (re-solved for whole turns)") : " (" + i.snap + " value)") : QString());
-    QList<QPair<QString, QString>> c = {{"L", f(r.L_uH, 3) + S(" µH")}, {cLab, f(r.C_pF, 1) + " pF" + (std::fabs(r.C_pF - r.cIdealPF) > 0.05 ? " (calc " + f(r.cIdealPF, 1) + ")" : QString())}, {"X at resonance", rnd(r.X) + S(" Ω")}};
+    QString cLab = "C" + (r.hasSnap ? " (" + r.snap.label + " value)" : std::fabs(r.C_pF - r.cIdealPF) > 0.05 && tor ? QString(" (re-solved for whole turns)") : QString());
+    QString cVal = f(r.C_pF, 1) + " pF" + (r.hasSnap ? " (exact " + f(r.snap.exactPF, 1) + ", " + pctSigned(r.snap.errPct) + ")" : std::fabs(r.C_pF - r.cIdealPF) > 0.05 ? " (calc " + f(r.cIdealPF, 1) + ")" : QString());
+    QList<QPair<QString, QString>> c = {{"L", f(r.L_uH, 3) + S(" µH")}, {cLab, cVal}, {"X at resonance", rnd(r.X) + S(" Ω")}};
+    if (r.hasSnap) c << qMakePair("f spread (" + r.snap.tolText + " C)", f(r.snap.fLoMHz, 3) + S("–") + f(r.snap.fHiMHz, 3) + " MHz");
+    m_snapHint->setText(i.snap == "none" ? tr("Exact C (no standard value).") : eSeriesHint(i.snap) + (r.hasSnap ? ". Snapped " + f(r.snap.exactPF, 1) + S(" → ") + f(r.snap.pF, 1) + " pF (" + pctSigned(r.snap.errPct) + "); resonance spread from the part tolerance " + spreadTxt(r.snap) + "." : QString(". Not applied while you design from the capacitance.")));
     if (tor) { const LcToroid &t = r.toroid; c << qMakePair(QString("Turns"), QString::number(t.N) + " on " + t.core->id + (i.stack > 1 ? S(" ×") + jsNum(i.stack) : QString()))
                << qMakePair(QString("L with %1 T").arg(t.N), f(t.uH, 3) + S(" µH")) << qMakePair(QString("Wire"), mmTxt(t.wireLenMM)) << qMakePair(QString("Core temp (est.)"), rnd(t.coreTempC) + S(" °C")); }
     else { const LcCoil &k = r.coil; c << qMakePair(QString("Turns"), f(k.N, 2)) << qMakePair(QString("Coil length"), mmTxt(k.lenMM, 1) + " (pitch " + f(k.pitchMM, 2) + ")")

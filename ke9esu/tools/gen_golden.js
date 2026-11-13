@@ -11,6 +11,7 @@ function designCase(inp) {
     compCap: d.compCap ? d.compCap.pF : null, perFreq: d.perFreq.map(p => [p.fMHz, p.r, p.x, p.z, p.bPk_mT, p.bHeat_G, p.heatLimit_G, p.lossPeakW, p.lossMatchedW]),
     wires: d.wires.map(w => [w.name, w.turns, w.lengthMM]), ...txt(d),
     cap: d.compCap ? [d.compCap.mode, d.compCap.pF, d.compCap.suggestedPF, d.compCap.pFcalc, d.compCap.rangePF[0], d.compCap.rangePF[1], d.compCap.vPeak, d.compCap.needV, d.compCap.minRatingV, d.compCap.ratingV, d.compCap.ratingOk, d.compCap.iRmsA, d.compCap.kvar, d.compCap.iAtMHz] : null,
+    capSer: [d.compCap ? [d.compCap.seriesLabel, d.compCap.snapErrPct] : null, d.capSuggestion ? [d.capSuggestion.seriesLabel, d.capSuggestion.snapErrPct] : null],
     capSug: d.capSuggestion ? [d.capSuggestion.pF, d.capSuggestion.pFcalc, d.capSuggestion.rangePF[0], d.capSuggestion.rangePF[1], d.capSuggestion.vPeak, d.capSuggestion.needV, d.capSuggestion.ratingV] : null,
     sweep: d.sweep ? sweepCase(d.sweep) : null };
 }
@@ -21,7 +22,7 @@ function sweepCase(s) {
   return { model: [m.kind, m.lLowUH, m.leadNH, m.ratio, m.loadOhm, m.z0, m.k, m.leakNH, m.csHighPF, m.csRefPF, m.lineZ0, m.lineMM, m.tauNs == null ? 0 : m.tauNs, m.lines],
     capPF: s.capPF, n: s.points.length, pts: sub(s.points, 10).map(([i, p]) => [i].concat(P(p))), loads: s.loads.map(l => [l.ohm, sub(l.swr, 25)]),
     band: s.band ? [s.band.maxSwr, s.band.meanSwr, s.band.atMHz] : null, readout: s.readout.map(p => [p.band].concat(P(p))),
-    opt: [s.opt.pF, s.opt.maxSwr, s.opt.meanSwr, s.opt.atMHz, s.opt.stdPF, s.opt.offMaxSwr, s.opt.offMeanSwr, s.opt.points] };
+    opt: [s.opt.pF, s.opt.maxSwr, s.opt.meanSwr, s.opt.atMHz, s.opt.stdPF, s.opt.offMaxSwr, s.opt.offMeanSwr, s.opt.points], optStdErr: s.opt.stdErrPct };
 }
 const tops = Object.keys(C.TOPOLOGIES);
 const coreIds = ["FT240-43", "FT140-43", "2.4in-31", "T200-2", "A:T-200-2", "A:FT-240-43", "FT82-61", "2643251002", "A:FT-140-77", "A:T-106-6"];
@@ -51,9 +52,11 @@ for (const mode of ["X", "L", "C"]) for (const snap of ["none", "E6", "E12", "E2
 for (const core of ["A:T-200-2", "A:T-130-6", "A:FT-240-43", "T200-2", "A:T-106-17"]) for (const f of [3.6, 7.1, 14.1, 21.2]) lcCases.push({ fMHz: f, coreType: "toroid", coreId: core, stack: f > 10 ? 2 : 1, snap: f > 10 ? "none" : "E12" });
 lcCases.push({ fMHz: 10.12, pitchMM: 6, formDiaMM: 60, capType: "vacuum", powerW: 1500, duty: "cw" });
 lcCases.push({ fMHz: 24.9, wireId: "tube3", capType: "doorknob", duty: "custom", dutyPercent: 15 });
+for (const snap of ["E6", "E24"]) for (const core of ["A:T-200-2", "T200-2"]) lcCases.push({ fMHz: 7.1, coreType: "toroid", coreId: core, snap });   // v1.3.3 snapped toroids
 for (const inp of lcCases) {
   const r = C.lcTrap(inp);
-  out.lc.push({ input: inp, L: r.L_uH, C: r.C_pF, cIdeal: r.cIdealPF, X: r.X, q: r.q, qCoil: r.qCoil, rp: r.rpOhm, cap: r.capRatingV, ic: r.capCurrentA, pd: r.pdKeyW, pdAvg: r.pdAvgW, vTrap: r.vTrap, fcs: r.fWithCsMHz,
+  out.lc.push({ input: inp, L: r.L_uH, C: r.C_pF, cIdeal: r.cIdealPF, cNeed: r.cNeedPF, fNom: r.fNomMHz, X: r.X,
+    snap: r.snap ? [r.snap.series, r.snap.label, r.snap.tolPct, r.snap.tolText, r.snap.hint, r.snap.exactPF, r.snap.pF, r.snap.errPct, r.snap.fMHz, r.snap.fLoMHz, r.snap.fHiMHz] : null, q: r.q, qCoil: r.qCoil, rp: r.rpOhm, cap: r.capRatingV, ic: r.capCurrentA, pd: r.pdKeyW, pdAvg: r.pdAvgW, vTrap: r.vTrap, fcs: r.fWithCsMHz,
     coil: r.coil ? [r.coil.N, r.coil.pitchMM, r.coil.DkMM, r.coil.lenMM, r.coil.esr, r.coil.uH, r.coil.csPF, r.coil.srfMHz, r.coil.q, r.coil.wheelerUH, r.coil.nagaokaRosaUH, r.coil.wireLenMM] : null,
     toroid: r.toroid ? [r.toroid.N, r.toroid.uH, r.toroid.qCore, r.toroid.qWire, r.toroid.wireLenMM, r.toroid.bGauss, r.toroid.limGauss, r.toroid.pCoreW, r.toroid.tempRiseC, r.toroid.coreTempC] : null,
     bands: r.bands.map(b => [b.band, b.fMHz, b.x, b.kind, b.eqUH, b.eqPF, b.near]), ...txt(r) });

@@ -354,3 +354,29 @@ cap variable")
   `25d_…_winding_tab`, `26_balun_sweep_efhw49`, `26d_…`, `27_balun_sweep_auto91`, `28_balun_sweep_load_range`,
   `29_balun_sweep_optimized`, `29d_…`, large-text 25b / 26b, `17_combiner_mixed_R` (selected row);
   `drawings/balun_winding_*.png`, `drawings/balun_sweep_efhw49.{png,csv}`.
+
+Milestone 2d — E-series tolerance everywhere a value is snapped (core v1.3.3; Ron: "Snap C to the series does not have
+% tolerance. Need to check other calculators as well.")
+- Audit of every E-series picker / snapped value (RF windows, Coil64 dialogs, standalone):
+  - LC trap "Snap C to": list now "exact C / E6 (20%) / E12 (10%) / E24 (5%)" (same `cc::seriesLabel` wording as the
+    combiner) with a hint "Parts in this series are typically ±10%. Snapped 112.9 → 120.0 pF (+6.3 %); resonance spread
+    from the part tolerance 6.722–7.431 MHz (−4.7 % … +5.4 %)". Card "C (E12 (10%) value) 120.0 pF (exact 112.9,
+    +6.3 %)" + "f spread (±10% C)"; cap check names series + snap error; new `tol` check (snap error, toroid detune
+    with whole turns, tolerance spread; NOTE, CHECK if the toroid lands > 2 % off); parts "120.0 pF ±10% (E12)";
+    "Snap … not applied" note when designing from C. Toroid: the snapped part's own resonance (f·√(C_need/C)) is now
+    stated (was silently ignored).
+  - Shunt C (balun): suggestion "100 pF E12 (10%), calc 96 pF, +4.2 %" (hint, note, check, build sheet); sweep optimum
+    "nearest E12 (10%) value 82 pF, +2.5 %".
+  - Standard-part combination: already "E12 (10%)" + hint (M2b) — the reference wording, unchanged.
+  - Coil64 LC circuit, "impedance and frequency known": C is snapped to E24 by Coil64 — the result now adds "E24 (5%)
+    standard value (snap error −2.5 %); parts in this series are typically ±5% → resonance 6.880–7.233 MHz".
+  - Coil64 Bandspread, "real capacitors" tab: C1 / C2 prefilled with E24 values — the info line and tooltips name
+    E24 (5%) and each snap error.
+  - Coil64's one-layer wire suggestion (`toNearestE24(..., isToLowVal)`) rounds a wire diameter down, not a part —
+    no tolerance applies; left as is. Coax trap / long-wire: no standard-value snapping.
+- Core: `eSeriesLabel/Tolerance/Hint/TolPct`, `pctSigned`, `SnapInfo snapInfo()`, `spreadTxt`, `snapNote` (trap_core);
+  `LcTrapResult.cNeedPF/fNomMHz/snap`; `CompCap.series/seriesLabel/snapErrPct`; `CapOpt.stdErrPct`. Golden: 62 LC
+  cases (+4 snapped toroids) incl. snap info; shunt C series / snap error; optimum snap error.
+- Tests 97 (94 + 3): wording identical to the combiner for E6…E192, pctSigned / spread maths, snapNote; LC trap
+  E6/E12/E24 (label, error, spread, parts), toroid detune, C given, exact; shunt C suggestion / optimum series.
+- Screenshots: `light|dark/13b_lc_trap_snap_E12`, `03_main_lc_zf_e24`.

@@ -5,6 +5,10 @@
 #include "project.h"
 #include "widgets.h"
 #include "balundialog.h"
+#include <QRadioButton>
+#include <QScrollBar>
+#include <QTextBrowser>
+#include <QTextBlock>
 #include "diagram.h"
 #include "eflwdialog.h"
 #include "trapdialogs.h"
@@ -379,6 +383,17 @@ void Bridge::screenshots(const QString &dir)
         m->mui->tabWidget->setCurrentIndex(0); refreshView(0, _Onelayer); g2(m, "00_main_one_layer");
         refreshView(0, _FerrToroid); g2(m, "01_main_ferrite_toroid");
         refreshView(2, -1); m->on_pushButton_Calculate_clicked(); g2(m, "02_main_lc_result");
+        // M2d: LC tank from Z and f snaps C to E24 - the result names the series, snap error and resonance spread
+        { QString z = m->mui->lineEdit_1_3->text(), fq = m->mui->lineEdit_2_3->text(); QRadioButton *was = m->mui->radioButton_CF->isChecked() ? m->mui->radioButton_CF : m->mui->radioButton_LF->isChecked() ? m->mui->radioButton_LF : m->mui->radioButton_ZF;
+          m->mui->radioButton_ZF->click(); m->mui->lineEdit_1_3->setText("200"); m->mui->lineEdit_2_3->setText("7.05"); m->on_pushButton_Calculate_clicked();
+          QApplication::processEvents(); m->mui->textBrowser->moveCursor(QTextCursor::Start); m->mui->textBrowser->find("Inductance of a circuit"); m->mui->textBrowser->ensureCursorVisible();
+          { QTextCursor tc = m->mui->textBrowser->textCursor(); tc.clearSelection(); m->mui->textBrowser->setTextCursor(tc); }
+          qInfo("KE9ESU shots: LC Z/f %s", qPrintable(m->mui->textBrowser->textCursor().block().text())); g2(m, "03_main_lc_zf_e24");
+          m->mui->lineEdit_1_3->setText(z); m->mui->lineEdit_2_3->setText(fq); was->click(); }
+        // M2d: LC trap with the C snapped to E12 (10%): list label, hint with snap error and resonance spread, cards
+        { Ke9esuDialog *lc = openWindow(Win::Lc); lc->resize(1280, 820); QJsonObject keep = lc->saveState(), st = keep, in = st.value("input").toObject();
+          in.insert("snap", "E12"); in.insert("mode", "X"); in.insert("xOhm", 200); in.insert("fMHz", 7.05); in.insert("coreType", "air"); st.insert("input", in); lc->loadState(st);
+          g2(lc, "13b_lc_trap_snap_E12"); lc->loadState(keep); lc->close(); }
         int i2 = 10;
         for (const QString &w : windowNames()) {
             Ke9esuDialog *d = openWindow(w); d->resize(1280, 820);

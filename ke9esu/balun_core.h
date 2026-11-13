@@ -34,7 +34,7 @@ If not, see <https://www.gnu.org/licenses/>.
 
 namespace ke9esu {
 
-static const char *const CORE_VERSION = "1.3.2";
+static const char *const CORE_VERSION = "1.3.3";
 static const double MU0 = 4e-7 * PI;
 
 struct Material {
@@ -102,6 +102,7 @@ struct WireCut { QString name; int turns; double lengthMM; };
 struct CompCap {
     QString mode; double pF = 0, pFcalc = 0; double rangePF[2] = {0, 0}; double vPeak = 0, needV = 0, ratingV = 0;
     double suggestedPF = 0, minRatingV = 0, iRmsA = 0, kvar = 0, iAtMHz = 0; bool ratingOk = true;
+    QString series = "E12", seriesLabel = "E12 (10%)"; double snapErrPct = 0;   // v1.3.3: suggestion is an E12 (10%) value
 };
 /* Transformer frequency sweep (v1.3.2), see core.js sweepModel(). kind "lumped" (tapped autotransformers) | "line" (Ruthroff). */
 struct SweepModel {
@@ -111,7 +112,7 @@ struct SweepModel {
 struct SweepPoint { double fMHz = 0, r = 0, x = 0, z = 0, swr = 1, rlDb = 0, effPct = 0, mismatchDb = 0; QString band; };
 struct BandPoint { QString band; double fMHz; };
 struct BandSwr { bool has = false; double maxSwr = 0, meanSwr = 0, atMHz = NaN; };
-struct CapOpt { double pF = 0, maxSwr = 0, meanSwr = 0, atMHz = NaN, stdPF = 0, offMaxSwr = 0, offMeanSwr = 0; int points = 0; };
+struct CapOpt { double pF = 0, maxSwr = 0, meanSwr = 0, atMHz = NaN, stdPF = 0, stdErrPct = 0, offMaxSwr = 0, offMeanSwr = 0; int points = 0; };
 struct LoadCurve { double ohm; std::vector<double> swr; };
 struct Sweep { SweepModel model; double capPF = 0; std::vector<SweepPoint> points; std::vector<LoadCurve> loads; BandSwr band; std::vector<SweepPoint> readout; CapOpt opt; };
 struct Fit { int perLayer, layers; double fill; };

@@ -1,6 +1,7 @@
-/* balun_core.cpp - KE9ESU Balun & Unun Designer core, C++ port of core.js v1.3.2. See balun_core.h for credits.
+/* balun_core.cpp - KE9ESU Balun & Unun Designer core, C++ port of core.js v1.3.3. See balun_core.h for credits.
    Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. */
 #include "balun_core.h"
+#include "trap_core.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -379,6 +380,7 @@ CompCap compensationCap(double fTopMHz, double powerW, double vswr, double zLow)
     double need = 5 * vPk, rating = CAP_RATINGS.back();
     for (double r : CAP_RATINGS) if (r >= need) { rating = r; break; }
     CompCap c; c.pF = best; c.pFcalc = pF; c.rangePF[0] = jsRound(best * 0.7); c.rangePF[1] = jsRound(best * 1.5); c.vPeak = vPk; c.needV = need; c.ratingV = rating;
+    c.series = "E12"; c.seriesLabel = eSeriesLabel("E12"); c.snapErrPct = (best - pF) / pF * 100;
     return c;
 }
 const std::vector<double> CAP_STD_PF = {10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100, 120, 150, 180, 220, 270, 330};
@@ -479,7 +481,7 @@ CapOpt optimizeCap(const Core &core, int n1, double stack, const SweepModel &m, 
         if (!have || r.maxSwr < best.maxSwr - 1e-9 || (std::fabs(r.maxSwr - best.maxSwr) <= 1e-9 && r.meanSwr < best.meanSwr)) { have = true; best.pF = c; best.maxSwr = r.maxSwr; best.meanSwr = r.meanSwr; best.atMHz = r.atMHz; }
     }
     BandSwr off = bandSwr(core, n1, stack, m, pts, m.loadOhm, 0);
-    best.stdPF = nearestStdPF(best.pF); best.offMaxSwr = off.maxSwr; best.offMeanSwr = off.meanSwr; best.points = (int)pts.size();
+    best.stdPF = nearestStdPF(best.pF); best.stdErrPct = best.pF > 0 ? (best.stdPF - best.pF) / best.pF * 100 : 0; best.offMaxSwr = off.maxSwr; best.offMeanSwr = off.meanSwr; best.points = (int)pts.size();
     return best;
 }
 Sweep transformerSweep(const BalunInput &inp, const Core &core, int n1, int n2, const Topology &top, double capPF)
@@ -645,7 +647,7 @@ DesignResult design(const BalunInput &raw)
     if (hasCap) {
         double cpf = inp.capMode == "suggested" ? capSug.pF : inp.capPF, vRmsW = capSug.vPeak / SQRT2, fI = inp.fMaxMHz;
         double iCap = vRmsW * 2 * PI * fI * 1e6 * cpf * 1e-12;
-        cap.mode = inp.capMode; cap.pF = cpf; cap.suggestedPF = capSug.pF; cap.pFcalc = capSug.pFcalc; cap.rangePF[0] = jsRound(cpf * 0.7); cap.rangePF[1] = jsRound(cpf * 1.5);
+        cap.mode = inp.capMode; cap.pF = cpf; cap.suggestedPF = capSug.pF; cap.pFcalc = capSug.pFcalc; cap.series = capSug.series; cap.seriesLabel = capSug.seriesLabel; cap.snapErrPct = capSug.snapErrPct; cap.rangePF[0] = jsRound(cpf * 0.7); cap.rangePF[1] = jsRound(cpf * 1.5);
         cap.vPeak = capSug.vPeak; cap.needV = capSug.needV; cap.minRatingV = capSug.ratingV; cap.ratingV = inp.capRatingV; cap.ratingOk = inp.capRatingV >= capSug.needV;
         cap.iRmsA = iCap; cap.kvar = vRmsW * iCap / 1000; cap.iAtMHz = fI;
     }
@@ -713,7 +715,7 @@ DesignResult design(const BalunInput &raw)
     double rl = isChoke ? 0 : sweep.model.loadOhm;
     if (!isChoke) {
         if (hasCap) {
-            add("cap", cap.ratingOk ? "ok" : "fail", "Low-side shunt capacitor " + jsNum(cap.pF) + " pF (" + (cap.mode == "suggested" ? "suggested" : "your value") + "; suggestion " + jsNum(cap.suggestedPF) + S(" pF, trim ") + jsNum(capSug.rangePF[0]) + S("–") + jsNum(capSug.rangePF[1]) + " pF) rated " + kvTxt(cap.ratingV) + S(": needs ≥ ") + kvTxt(cap.minRatingV) + S(" (input peak ≈ ") + rnd(cap.vPeak) + " V at " + jsNum(inp.powerW) + " W, SWR " + jsNum(inp.vswr) + S(":1, ×5 margin)") + (cap.ratingOk ? QString("; 10 kV is typical for margin and doorknob / HV ceramic availability.") : S(" — the picked rating is BELOW the need: choose a higher-voltage capacitor.")));
+            add("cap", cap.ratingOk ? "ok" : "fail", "Low-side shunt capacitor " + jsNum(cap.pF) + " pF (" + (cap.mode == "suggested" ? "suggested" : "your value") + "; suggestion " + jsNum(cap.suggestedPF) + " pF " + cap.seriesLabel + ", calc " + toFixed(cap.pFcalc, 0) + " pF, " + pctSigned(cap.snapErrPct) + S("; trim ") + jsNum(capSug.rangePF[0]) + S("–") + jsNum(capSug.rangePF[1]) + " pF) rated " + kvTxt(cap.ratingV) + S(": needs ≥ ") + kvTxt(cap.minRatingV) + S(" (input peak ≈ ") + rnd(cap.vPeak) + " V at " + jsNum(inp.powerW) + " W, SWR " + jsNum(inp.vswr) + S(":1, ×5 margin)") + (cap.ratingOk ? QString("; 10 kV is typical for margin and doorknob / HV ceramic availability.") : S(" — the picked rating is BELOW the need: choose a higher-voltage capacitor.")));
             add("capI", cap.iRmsA > 2 ? "warn" : "info", "Capacitor RF current up to " + f1(cap.iRmsA, 2) + " A RMS (" + f1(cap.kvar * 1000, 0) + " VAR) at " + f1(cap.iAtMHz, 1) + " MHz with SWR " + jsNum(inp.vswr) + ":1" + (cap.iRmsA > 2 ? S(" — use a transmitting doorknob / HV ceramic (N4700/C0G) or mica rated for that current, or parallel two; small disc ceramics overheat.") : QString("; a doorknob / HV ceramic or silver mica handles it.")));
         } else add("cap", "info", "No low-side shunt capacitor" + (inp.capMode == "off" && defaultCapMode(top.id) == "off" ? S(" (default for the Ruthroff: a bootstrap transmission-line transformer whose leakage is the line itself, so a shunt C across the input only adds capacitive susceptance)") : QString()) + ". Many builders put ~" + jsNum(capSug.pF) + S(" pF (≥ ") + kvTxt(capSug.ratingV) + S(") from the SO-239 centre to the shell to flatten the 10–6 m SWR; the sweep's Optimize suggests ") + jsNum(sweep.opt.pF) + " pF for this design.");
         if (hasCap && sweep.band.has && sweep.band.maxSwr > sweep.opt.offMaxSwr * 1.1) add("capEffect", "warn", "In this model the " + jsNum(cap.pF) + " pF shunt capacitor makes the worst-band SWR worse (" + f1(sweep.band.maxSwr, 2) + ":1 with it vs " + f1(sweep.opt.offMaxSwr, 2) + ":1 without); Optimize suggests " + jsNum(sweep.opt.pF) + " pF (" + f1(sweep.opt.maxSwr, 2) + ":1). Confirm on the analyser before fitting it.");

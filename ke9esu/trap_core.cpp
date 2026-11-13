@@ -1,7 +1,9 @@
-/* trap_core.cpp - KE9ESU coax-trap and LC-trap core, C++ port of core.js v1.3.2 (see trap_core.h).
+/* trap_core.cpp - KE9ESU coax-trap and LC-trap core, C++ port of core.js v1.3.3 (see trap_core.h).
    Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. Coil-maths ports: Coil64 (C) Valery Kustarev, GPL-3.0-or-later. */
 #include "trap_core.h"
+#include "combiner_core.h"
 #include <QRegularExpression>
+#include <QMap>
 #include <algorithm>
 
 namespace ke9esu {
@@ -212,6 +214,34 @@ CoilQ coilQ(double I, double Df, double pm, double dw, double fa, double fsr, do
 }
 double wireRac(double lenM, double dwMM, double fMHz) { double r = dwMM / 2000; return RHO_CU * lenM / (PI * r * r) * skinFactor(fMHz * 1e3, dwMM); }
 
+QString eSeriesTolerance(const QString &series) { return series.startsWith('E') ? cc::seriesTolerance(series) : QString(); }
+QString eSeriesLabel(const QString &series) { return eSeriesTolerance(series).isEmpty() ? series : cc::seriesLabel(series); }
+QString eSeriesHint(const QString &series) { return eSeriesTolerance(series).isEmpty() ? QString() : cc::seriesHint(series); }
+double eSeriesTolPct(const QString &series)
+{
+    static const QMap<QString, double> T = {{"E6", 20}, {"E12", 10}, {"E24", 5}, {"E48", 2}, {"E96", 1}, {"E192", 0.5}};
+    return T.value(series, 0);
+}
+QString pctSigned(double v, int d) { QString t = toFixed(std::fabs(v), d); return (t.toDouble() == 0 ? QString() : v < 0 ? S("−") : QString("+")) + t + " %"; }
+SnapInfo snapInfo(const QString &series, double exactPF, double pF, double fMHz)
+{
+    SnapInfo s; s.series = series; s.label = eSeriesLabel(series); s.tolPct = eSeriesTolPct(series); s.tolText = eSeriesTolerance(series); s.hint = eSeriesHint(series);
+    double t = s.tolPct / 100; s.exactPF = exactPF; s.pF = pF; s.errPct = (pF - exactPF) / exactPF * 100; s.fMHz = fMHz;
+    s.fLoMHz = fMHz / std::sqrt(1 + t); s.fHiMHz = fMHz / std::sqrt(1 - t); return s;
+}
+QString spreadTxt(const SnapInfo &sn, int d)
+{
+    return toFixed(sn.fLoMHz, d) + S("–") + toFixed(sn.fHiMHz, d) + " MHz (" + pctSigned((sn.fLoMHz / sn.fMHz - 1) * 100) + S(" … ") + pctSigned((sn.fHiMHz / sn.fMHz - 1) * 100) + ")";
+}
+
+QString snapNote(const QString &series, double exact, double snapped, double fMHz)
+{
+    if (!(exact > 0) || !(snapped > 0)) return QString();
+    SnapInfo sn = snapInfo(series, exact, snapped, fMHz > 0 ? fMHz : 1);
+    QString h = sn.hint; if (!h.isEmpty()) h[0] = h[0].toLower();
+    return sn.label + " standard value (snap error " + pctSigned(sn.errPct) + "); " + h + (fMHz > 0 ? S(" → resonance ") + spreadTxt(sn) + " with L fixed" : QString()) + ".";
+}
+
 double snapE(double v, const QString &series)
 {
     const std::vector<double> *s = eSeries(series);
@@ -346,8 +376,8 @@ LcTrapResult lcTrap(const LcTrapInput &raw)
     if (i.mode == "L") { L = i.lUH; C = 1e12 / (w * w * L * 1e-6); }
     else if (i.mode == "C") { C = i.cPF; L = 1e6 / (w * w * C * 1e-12); }
     else { L = i.xOhm / w * 1e6; C = 1e12 / (w * i.xOhm); }
-    double cIdeal = C;
-    if (i.snap != "none" && i.mode != "C") { C = snapE(C, i.snap); L = 1e6 / (w * w * C * 1e-12); }
+    double cIdeal = C, cNeed = C, fNom = f; bool snapped = false;
+    if (i.snap != "none" && i.mode != "C") { C = snapE(C, i.snap); L = 1e6 / (w * w * C * 1e-12); snapped = true; }
     double X = w * L * 1e-6;
     LcTrapResult res; std::vector<Check> &checks = res.checks;
     auto add = [&](const QString &id, const QString &s, const QString &t) { checks.push_back({id, s, t}); };
@@ -370,7 +400,7 @@ LcTrapResult lcTrap(const LcTrapInput &raw)
         const Core &core = *coreById(i.coreId); const Material &mat = *material(core.mat);
         int Nt = (int)std::max(1.0, jsRound(std::sqrt(L * 1000 / (core.al * i.stack))));
         double Lt = core.al * i.stack * Nt * Nt / 1000;
-        L = Lt; C = 1e12 / (w * w * L * 1e-6); if (i.snap != "none") C = snapE(C, i.snap); X = w * L * 1e-6;
+        L = Lt; C = 1e12 / (w * w * L * 1e-6); cNeed = C; snapped = i.snap != "none"; if (snapped) { C = snapE(C, i.snap); fNom = f * std::sqrt(cNeed / C); } X = w * L * 1e-6;
         Complex2 mu = permeability(core.mat, f * 1e6); double qCore = mu.re / std::max(mu.im, 1e-9);
         wire = coilWireById(i.wireId);
         double tl = turnLengthMM(core, i.stack, wire->od), wl = Nt * tl + 2 * i.leadMM, qWire = X / wireRac(wl / 1000, wire->dia, f);
@@ -379,7 +409,7 @@ LcTrapResult lcTrap(const LcTrapInput &raw)
         double pCore = V0.rms * V0.rms / (qCore * X) * i.dutyPercent / 100, dT = tempRiseC(pCore, coreSurfaceCm2(core, i.stack));
         res.hasToroid = true;
         res.toroid = {&core, Nt, Lt, qCore, qWire, wl, bG, lim, pCore, dT, i.ambientC + dT, wire};
-        add("toroid", "ok", QString::number(Nt) + " turns of " + wireLabel(*wire) + " on " + core.id + (i.stack > 1 ? S(" ×") + jsNum(i.stack) : QString()) + " (AL " + jsNum(core.al) + S(" nH/T²") + (core.hasAlAmidon ? " = " + jsNum(core.alAmidonValue) + " " + core.alAmidonUnit : QString()) + S(") → ") + f2(Lt, 3) + S(" µH; C re-solved to ") + f2(C, 1) + " pF to keep " + jsNum(f) + " MHz.");
+        add("toroid", "ok", QString::number(Nt) + " turns of " + wireLabel(*wire) + " on " + core.id + (i.stack > 1 ? S(" ×") + jsNum(i.stack) : QString()) + " (AL " + jsNum(core.al) + S(" nH/T²") + (core.hasAlAmidon ? " = " + jsNum(core.alAmidonValue) + " " + core.alAmidonUnit : QString()) + S(") → ") + f2(Lt, 3) + S(" µH; C re-solved to ") + f2(cNeed, 1) + " pF to keep " + jsNum(f) + " MHz" + (snapped ? "; the " + eSeriesLabel(i.snap) + " part is " + f2(C, 1) + S(" pF → ") + f2(fNom, 3) + " MHz" : QString()) + ".");
         if (mat.kind != "iron") add("ferrite", "fail", S("Ferrite is not recommended for traps: µ changes with temperature and flux, loss is high (Q≈") + rnd(qCore) + " here), so the trap detunes and heats exactly when it sees full voltage. Use iron powder (-2/-6/-10) or an air coil.");
         else {
             if (!mat.freq.isEmpty() && mat.freq.contains("MHz")) {
@@ -392,14 +422,21 @@ LcTrapResult lcTrap(const LcTrapInput &raw)
             add("qcore", "info", S("Q: material ≈ ") + rnd(qCore) + S(" (nominal, rough), wire ≈ ") + rnd(qWire) + ".");
         }
     }
+    SnapInfo sn; if (snapped) sn = snapInfo(i.snap, cNeed, C, fNom);
     const CapType &cap = *capType(i.capType); double Q = 1 / (1 / Qcoil + 1 / cap.q), Rp = Q * X; TrapVoltage V = trapVoltage(i.powerW, i.zEnd);
     double rating = capRating(V.pk, 2), Ic = V.rms / X, pd = V.rms * V.rms / Rp, pdAvg = pd * i.dutyPercent / 100;
     double cNet = C - csPF, cFit = i.snap != "none" || !(cNet > 0) ? C : cNet;
-    QString capTxt = "Capacitor " + f2(C, 1) + " pF" + (i.snap != "none" ? " (" + i.snap + " value; exact " + f2(cIdeal, 1) + " pF)" : QString());
+    QString capTxt = "Capacitor " + f2(C, 1) + " pF" + (snapped ? " (" + sn.label + " value; exact " + f2(sn.exactPF, 1) + " pF, " + pctSigned(sn.errPct) + ")" : QString());
     if (csPF > 0) capTxt += i.snap != "none" ? S(" — the coil adds ≈ ") + f2(csPF, 1) + " pF self-capacitance; fit the " + f2(C, 1) + " pF part and spread the turns slightly to retune"
                                              : S(" — the coil adds ≈ ") + f2(csPF, 1) + S(" pF self-capacitance, so fit ≈ ") + f2(cNet, 1) + " pF";
     capTxt += S(", rated ≥ ") + jsNum(rating) + S(" V (2 × ") + rnd(V.pk) + S(" V peak). RF current ≈ ") + f2(Ic, 2) + " A RMS (" + f2(V.rms * Ic / 1000, 2) + " kVAR). " + cap.label + ": " + cap.note;
     add("cap", "ok", capTxt);
+    if (snapped) {
+        double dev = (fNom / f - 1) * 100;
+        add("tol", std::fabs(dev) > 2 ? "warn" : "info", "Standard-value capacitor: " + sn.label + " " + f2(C, 1) + " pF for an exact " + f2(sn.exactPF, 1) + " pF (snap error " + pctSigned(sn.errPct) + ")" +
+            (std::fabs(dev) >= 0.05 ? "; with " + QString::number(res.toroid.N) + " whole turns the trap resonates at " + f2(fNom, 3) + " MHz (" + pctSigned(dev) + S(") — spread or compress the turns to bring it back") : "; L is re-solved, so the trap still resonates at " + jsNum(f) + " MHz") +
+            ". " + sn.hint + S(" → resonance ") + spreadTxt(sn) + S(" with L fixed. Tune it on a dip meter / analyser, or use a ±5 % / ±1 % C0G or mica part to narrow the spread."));
+    } else if (i.snap != "none") add("tol", "info", "Snap to " + eSeriesLabel(i.snap) + " not applied: you chose the capacitor value, so L is solved for it. " + eSeriesHint(i.snap) + S(" → resonance ") + spreadTxt(snapInfo(i.snap, C, C, f)) + " with L fixed.");
     add("x", X < 100 ? "info" : (X > 400 ? "warn" : "ok"), "Trap reactance X = " + f2(X, 0) + S(" Ω. Guidance (ARRL Antenna Book, W8JI): ~100–300 Ω. Higher X → higher Rp (better isolation) but more loading/shortening and loss on the lower band and a narrower bandwidth; lower X → broader, less loading, less isolation."));
     add("q", "info", S("Unloaded trap Q ≈ ") + rnd(Q) + " (coil " + rnd(Qcoil) + S(", capacitor ≈ ") + jsNum(cap.q) + S(") → Rp ≈ ") + toFixed(Rp / 1000, 1) + S(" kΩ. W8JI measured 100 kΩ for 100 pF + #12-wire coil at 7 MHz, 250–300 kΩ with copper tubing and vacuum/15 kV caps."));
     add("heat2", pdAvg > 20 ? "warn" : "ok", "Dissipation on the trap frequency: " + f2(pd, 1) + " W key-down, " + f2(pdAvg, 1) + " W average (" + jsNum(i.dutyPercent) + S("% duty) at ≈ ") + rnd(V.rms) + S(" V RMS across the trap (√(P·Z_end), Z_end ") + jsNum(i.zEnd) + S(" Ω)."));
@@ -417,11 +454,11 @@ LcTrapResult lcTrap(const LcTrapInput &raw)
         "Antenna wires to the two winding ends via a strain-relieved insulator (the core must not carry tension).",
         S("Tune with a dip meter/analyser by spreading or compressing turns (±3–5%)."),
         S("Weatherproof; iron-powder binders age above ~75–100 °C — avoid transmitting on the trap frequency.")};
-    res.parts = {{1, "Capacitor " + f2(i.coreType == "air" ? cFit : C, 1) + S(" pF, ≥ ") + jsNum(rating) + " V, " + cap.label + S(" (RF current ≥ ") + f2(Ic * 1.5, 1) + " A)"}};
+    res.parts = {{1, "Capacitor " + f2(i.coreType == "air" ? cFit : C, 1) + " pF" + (snapped ? " " + sn.tolText + " (" + sn.series + ")" : QString()) + S(", ≥ ") + jsNum(rating) + " V, " + cap.label + S(" (RF current ≥ ") + f2(Ic * 1.5, 1) + " A)"}};
     if (res.hasCoil) { res.parts.push_back({1, wireLabel(*res.coil.wire) + ": " + mmTxt(res.coil.wireLenMM)}); res.parts.push_back({1, "Coil form " + mmTxt(i.formDiaMM, 1) + S(" OD (PVC/PTFE/acrylic), ≈ ") + mmTxt(res.coil.lenMM + 40) + " long"}); }
     else { res.parts.push_back({i.stack, res.toroid.core->id + " (" + res.toroid.core->pn + ", " + dimsTxt(*res.toroid.core) + (!res.toroid.core->color.isEmpty() ? ", colour " + res.toroid.core->color : QString()) + ")"}); res.parts.push_back({1, wireLabel(*res.toroid.wire) + ": " + mmTxt(res.toroid.wireLenMM)}); }
     res.parts.push_back({1, "Insulator / enclosure, strain relief, sealant"});
-    res.input = i; res.L_uH = L; res.C_pF = C; res.cIdealPF = cIdeal; res.X = X; res.q = Q; res.qCoil = Qcoil; res.rpOhm = Rp; res.vTrap = V; res.capRatingV = rating; res.capCurrentA = Ic;
+    res.input = i; res.L_uH = L; res.C_pF = C; res.cIdealPF = cIdeal; res.cNeedPF = cNeed; res.fNomMHz = fNom; res.hasSnap = snapped; res.snap = sn; res.X = X; res.q = Q; res.qCoil = Qcoil; res.rpOhm = Rp; res.vTrap = V; res.capRatingV = rating; res.capCurrentA = Ic;
     res.pdKeyW = pd; res.pdAvgW = pdAvg; res.fWithCsMHz = fTrue; res.bands = trapReactanceAtBands(L, C, f, false);
     return res;
 }

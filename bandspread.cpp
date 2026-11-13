@@ -16,6 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses
 */
 #include "bandspread.h"
 #include "ui_bandspread.h"
+#include "ke9esu/trap_core.h"
 
 Bandspread::Bandspread(QWidget *parent) :
     QDialog(parent),
@@ -204,6 +205,14 @@ void Bandspread::on_tabWidget_currentChanged(int index)
         ui->lineEdit_ct_r->setText(loc.toString(toNearestE24(dCt, fOpt->dwAccuracy)));
         double dCp = loc.toDouble(ui->lineEdit_cp->text());
         ui->lineEdit_cp_r->setText(loc.toString(toNearestE24(dCp, fOpt->dwAccuracy)));
+        {   // KE9ESU: the real-capacitor tab starts from E24 values - name the series, its tolerance and each snap error
+            double sCt = toNearestE24(dCt, fOpt->dwAccuracy), sCp = toNearestE24(dCp, fOpt->dwAccuracy);
+            QString n1 = ke9esu::snapNote("E24", dCt, sCt), n2 = ke9esu::snapNote("E24", dCp, sCp);
+            ui->lineEdit_ct_r->setToolTip("C1: " + n1); ui->lineEdit_cp_r->setToolTip("C2: " + n2);
+            if (!n1.isEmpty() || !n2.isEmpty())
+                ui->label_info_r->setText("<i>" + tr("C1 and C2 were filled with the nearest E24 (5%) values") + (n1.isEmpty() ? QString() : "<br/>C1: " + n1.toHtmlEscaped())
+                                          + (n2.isEmpty() ? QString() : "<br/>C2: " + n2.toHtmlEscaped()) + "</i>");
+        }
         ui->lineEdit_ct_r->setFocus();
         ui->lineEdit_ct_r->selectAll();
     }

@@ -21,7 +21,7 @@ Branches
 2. **Integer division in the Arnold proximity table** (`resolve_q.cpp`, Table4_b): `4 / 19` evaluated to 0, making
    the proximity factor jump for long single-layer coils (ρ > 8). Now `4.0 / 19.0`, continuous with the table.
 
-Details: `docs/PORTING.md` → "Coil64 bug fixes in the fork". The standalone designer (v1.3.2) already follows selectable wire units (AWG / mm / in).
+Details: `docs/PORTING.md` → "Coil64 bug fixes in the fork". The standalone designer (v1.3.3) already follows selectable wire units (AWG / mm / in).
 
 ## Windows build
 `.github/workflows/windows-build.yml` builds `Coil64.exe` on every push to `ke9esu*` branches (or by hand via
@@ -53,6 +53,9 @@ Menu **RF transformers & traps**:
 - **Long-wire analyzer** — band-by-band impedance tendency for an end-fed wire (default 124 ft, 160–6 m, 100 W), avoid
   zones and good lengths, recommended transformer (opens in the designer) and trap suggestions (open in the trap windows).
 - **Coax trap** and **LC trap** — turns / coil / capacitor, Q, SRF, voltage and current checks, reactance on the other bands.
+  The LC trap's "Snap C to" list shows each series' tolerance (E6 (20%), E12 (10%), E24 (5%)); a snapped C shows its
+  snap error and the resonance spread its tolerance gives. The same wording is used wherever a value is snapped (shunt
+  C suggestion and sweep optimum, Coil64's LC circuit from Z and f, Bandspread's real-capacitor tab).
 - **Core database** — Fair-Rite + Micrometals (datasheets) or Amidon (with corrections, e.g. FT-240-43 AL 1075,
   T-50-6 AL 40) or all, AL cross-checks, source links.
 - **Find standard-part combination** — series / parallel / mixed networks of up to 6 parts from E6…E192 (each series
@@ -76,7 +79,7 @@ session is restored automatically. Menu toggles: link core & wire live; share Co
 
 Tests: `tests/ke9esu` (console target, also run in CI on Windows and Linux) — the designer's and combiner's own test
 suites ported to C++, plus golden diffs of 150 000+ values against the JavaScript originals (byte-identical texts),
-plus theme / text-size settings tests (94 cases).
+plus theme / text-size settings tests (97 cases).
 
 ## Look & feel (Milestone 2)
 Coil64 now follows the KE9ESU web app's look; the drawings follow Coil64.

@@ -82,6 +82,7 @@ private slots:
 private:
     LcTrapInput input() const;
     void setInput(const LcTrapInput &i);
+    QLabel *m_snapHint = nullptr;
     FreqPicker *m_f; QComboBox *m_mode, *m_snap, *m_coreType, *m_form, *m_wire, *m_cap;
     QDoubleSpinBox *m_x, *m_l, *m_c; QSpinBox *m_stack; LenSpin *m_dia, *m_pitch, *m_lead;
     CoreSelector *m_core; QWidget *m_air, *m_tor; ProjectBox *m_proj; QLabel *m_req, *m_coilNote;

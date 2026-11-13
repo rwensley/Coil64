@@ -1,4 +1,4 @@
-/* trap_core.h - KE9ESU coax-trap and LC-trap designer core, C++ port of the trap section of core.js v1.3.2.
+/* trap_core.h - KE9ESU coax-trap and LC-trap designer core, C++ port of the trap section of core.js v1.3.3.
    Coax traps: VE6YP / W4ULD / K7MEM lumped model with the W8JI open-stub correction.
    LC traps: air-core coil maths ported from Coil64 (resolves.cpp HeliCoilS - R. Weaver helical-filament inductance;
    bessel.cpp + resolve_srf_cs.cpp - D. W. Knight self-capacitance and SRF; resolve_q.cpp solve_Qr - Arnold tables and
@@ -49,6 +49,19 @@ double skinFactor(double fkHz, double dw);
 CoilQ coilQ(double I, double Df, double pm, double dw, double fa, double fsr, double N, double Cs);
 double wireRac(double lenM, double dwMM, double fMHz);
 double snapE(double v, const QString &series);
+/* E-series tolerance wording (v1.3.3), identical to the Component Combiner (cc::seriesLabel etc.) */
+QString eSeriesTolerance(const QString &series);   // "±10%"
+QString eSeriesLabel(const QString &series);       // "E12 (10%)"; unknown → as given
+QString eSeriesHint(const QString &series);        // "Parts in this series are typically ±10%"
+double eSeriesTolPct(const QString &series);       // 10; E192 0.5; unknown 0
+QString pctSigned(double v, int d = 1);            // "+3.8 %", "−4.7 %", "0.0 %"
+/** A value snapped to an E-series part: snap error, tolerance and the resonance spread with L fixed (f ∝ 1/√C). */
+struct SnapInfo { QString series, label, tolText, hint; double tolPct = 0, exactPF = 0, pF = 0, errPct = 0, fMHz = 0, fLoMHz = 0, fHiMHz = 0; };
+SnapInfo snapInfo(const QString &series, double exactPF, double pF, double fMHz);
+QString spreadTxt(const SnapInfo &sn, int d = 3);  // "6.674–7.379 MHz (−4.7 % … +5.4 %)"
+/** One-line note for a value Coil64 snaps itself (LC tank C from Z, bandspread C1/C2): "E24 (5%) standard value (snap error +1.8 %);
+    parts in this series are typically ±5%[ → resonance 6.9–7.2 MHz (…)]". fMHz <= 0 leaves out the resonance spread. */
+QString snapNote(const QString &series, double exact, double snapped, double fMHz = 0);
 double capRating(double vPk, double margin = 2);
 TrapVoltage trapVoltage(double powerW, double zEnd);
 std::vector<TrapBand> trapReactanceAtBands(double L_uH, double C_pF, double f0MHz, bool skipSame);
@@ -79,7 +92,7 @@ LcTrapInput normalizeLcTrap(const LcTrapInput &r);
 struct LcCoil { double N, pitchMM, DkMM, lenMM, wireLenMM, uH, csPF, srfMHz, q, esr, wheelerUH, nagaokaRosaUH; const Wire *wire; };
 struct LcToroid { const Core *core; int N; double uH, qCore, qWire, wireLenMM, bGauss, limGauss, pCoreW, tempRiseC, coreTempC; const Wire *wire; };
 struct LcTrapResult {
-    LcTrapInput input; double L_uH, C_pF, cIdealPF, X;
+    LcTrapInput input; double L_uH, C_pF, cIdealPF, cNeedPF, fNomMHz, X; bool hasSnap = false; SnapInfo snap;
     bool hasCoil = false; LcCoil coil{}; bool hasToroid = false; LcToroid toroid{};
     double q, qCoil, rpOhm; TrapVoltage vTrap; double capRatingV, capCurrentA, pdKeyW, pdAvgW, fWithCsMHz;
     std::vector<TrapBand> bands; std::vector<Check> checks; QStringList steps; std::vector<Part> parts;
