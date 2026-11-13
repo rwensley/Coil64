@@ -662,6 +662,8 @@ static cc::Node leafN(double v) { cc::Node n; n.leaf = true; n.v = v; n.x = v; r
 static cc::Node opN(int op, std::vector<cc::Node> kids) { cc::Node n; n.leaf = false; n.op = op; n.kids = std::move(kids); return n; }
 static bool dark(const QImage &img, int x, int y) { if (x < 0 || y < 0 || x >= img.width() || y >= img.height()) return false; return qGray(img.pixel(x, y)) < 110; }
 static int darkCount(const QImage &img, QRect r = QRect()) { if (r.isNull()) r = img.rect(); int n = 0; for (int y = r.top(); y <= r.bottom(); y++) for (int x = r.left(); x <= r.right(); x++) n += dark(img, x, y); return n; }
+/* Qt's offscreen platform on Windows has no font database (no text is drawn); the label check needs real glyphs */
+static bool canDrawText() { QImage i(60, 30, QImage::Format_ARGB32); i.fill(Qt::white); QPainter p(&i); QFont f; f.setPixelSize(20); p.setFont(f); p.setPen(Qt::black); p.drawText(5, 24, "R1"); p.end(); return darkCount(i) > 10; }
 static void combinerUiTests()
 {
     t("combiner: every value series shows its % tolerance (same text as the web app's Value series list)", [] {
@@ -717,6 +719,7 @@ static void combinerUiTests()
         REQ1(net::prefix('R') == "R" && net::prefix('C') == "C" && net::prefix('L') == "L");
     });
     t("combiner diagram: renders R, C and L series / parallel / mixed networks (rails, junction dots, symbols, labels)", [] {
+        if (!canDrawText()) std::printf("      (this platform draws no text: label check skipped, the smoke run checks the real window)\n");
         for (QChar ty : {QChar('R'), QChar('C'), QChar('L')}) {
             double u = ty == 'R' ? 1000 : ty == 'C' ? 1e-9 : 1e-6;
             cc::Node ser = opN(1, {leafN(u), leafN(2.2 * u)}), par = opN(2, {leafN(u), leafN(2.2 * u), leafN(4.7 * u)}), mix = opN(2, {ser, leafN(10 * u)});
@@ -725,7 +728,7 @@ static void combinerUiTests()
                 REQ1(img.width() == int(std::ceil(sz.width() * 2)) && img.height() == int(std::ceil(sz.height() * 2)));
                 int ink = darkCount(img); REQ(ink > 300 * (n.leaf ? 1 : (int)n.kids.size()), QString::number(ink));
                 REQ(qGray(img.pixel(1, 1)) > 250 && qGray(img.pixel(img.width() - 2, img.height() - 2)) > 250, "paper background");
-                REQ(darkCount(img, QRect(0, 0, img.width(), 2 * 20)) > 20, "value labels on top row");   // labels drawn
+                if (canDrawText()) REQ(darkCount(img, QRect(0, 0, img.width(), 2 * 20)) > 20, "value labels on top row");   // labels drawn
                 QImage big = net::render(n, ty, 4); REQ1(std::abs(big.width() - 2 * img.width()) <= 2);   // scales for large text
             }
             // parallel: two vertical rails, junction dots at the middle branch
