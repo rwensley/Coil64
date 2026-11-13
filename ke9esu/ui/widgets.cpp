@@ -4,6 +4,16 @@
 #include "project.h"
 #include "ke9esu_util.h"
 #include "system_functions.h"
+#include "theme.h"
+#include <QFontMetrics>
+#include <QTimer>
+#include <QScrollBar>
+#include <QScrollArea>
+#include <QSplitter>
+#include <QAbstractItemView>
+#include <QComboBox>
+#include <QStyle>
+#include <QMouseEvent>
 #include <QBoxLayout>
 #include <QGridLayout>
 #include <QFormLayout>
@@ -28,7 +38,8 @@ QString f(double v, int d) { return toFixed(v, d); }
 QString fmtOhm(double v) { return v >= 10000 ? f(v / 1000, 1) + S(" kΩ") : v >= 1000 ? f(v / 1000, 2) + S(" kΩ") : rnd(v) + S(" Ω"); }
 QString esc(const QString &s) { return s.toHtmlEscaped(); }
 QString sevTag(const QString &s) { return s == "fail" ? "FAIL" : s == "warn" ? "CHECK" : s == "info" ? "NOTE" : "OK"; }
-QColor sevColor(const QString &s) { return s == "fail" ? QColor("#c62828") : s == "warn" ? QColor("#b26a00") : s == "info" ? QColor("#1f5fbf") : QColor("#2e7d32"); }
+QColor sevColor(const QString &s) { const ThemeColors &t = theme(); return s == "fail" ? t.fail : s == "warn" ? t.warn : s == "info" ? t.info : t.ok; }
+QColor sevPrintColor(const QString &s) { const ThemeColors t = lightColors(); return s == "fail" ? t.fail : s == "warn" ? t.warn : s == "info" ? t.info : t.ok; }
 
 QSettings *ke9esuSettings()
 {
@@ -51,10 +62,10 @@ static const char *SEVS[4] = {"fail", "warn", "info", "ok"};
 ChecksBar::ChecksBar(QWidget *parent) : QWidget(parent)
 {
     QVBoxLayout *v = new QVBoxLayout(this); v->setContentsMargins(0, 0, 0, 0); v->setSpacing(4);
-    QHBoxLayout *h = new QHBoxLayout; h->setSpacing(10);
+    QWidget *row = new QWidget; FlowLayout *h = new FlowLayout(row, 10, 6);
     QLabel *t = new QLabel("<b>" + tr("Checks:") + "</b>"); h->addWidget(t);
     for (int i = 0; i < 4; i++) {
-        m_box[i] = new QCheckBox(this);
+        m_box[i] = new QCheckBox(this); m_box[i]->setProperty("ke9esuSev", SEVS[i]); m_box[i]->setCursor(Qt::PointingHandCursor);
         m_box[i]->setToolTip(tr("Show/hide the %1 items").arg(sevTag(SEVS[i])));
         m_box[i]->setChecked(ke9esuSettings()->value(QString("KE9ESU/checks/show_") + SEVS[i], false).toBool());
         connect(m_box[i], &QCheckBox::toggled, this, [i](bool on) {
@@ -63,8 +74,8 @@ ChecksBar::ChecksBar(QWidget *parent) : QWidget(parent)
         });
         h->addWidget(m_box[i]);
     }
-    QLabel *hint = new QLabel("<i>" + tr("tick to list") + "</i>"); hint->setWordWrap(true); h->addWidget(hint, 1);
-    v->addLayout(h);
+    QLabel *hint = new QLabel(tr("tick to list")); hint->setObjectName("ke9esuHint"); h->addWidget(hint);
+    v->addWidget(row);
     m_list = new QLabel; m_list->setWordWrap(true); m_list->setTextFormat(Qt::RichText); m_list->setTextInteractionFlags(Qt::TextSelectableByMouse);
     v->addWidget(m_list);
 }
@@ -81,8 +92,8 @@ void ChecksBar::reload()
         { QSignalBlocker b(m_box[i]); m_box[i]->setChecked(on); }
         m_box[i]->setText(QString("%1 %2").arg(sevTag(SEVS[i])).arg(n[i]));
         QColor c = sevColor(SEVS[i]);
-        m_box[i]->setStyleSheet(QString("QCheckBox{color:%1;font-weight:bold;padding:2px 6px;border:1px solid %1;border-radius:9px;%2}")
-                                    .arg(c.name(), n[i] ? "" : "color:#999;border-color:#bbb;font-weight:normal;"));
+        bool zero = n[i] == 0;
+        if (m_box[i]->property("ke9esuZero").toBool() != zero) { m_box[i]->setProperty("ke9esuZero", zero); m_box[i]->style()->unpolish(m_box[i]); m_box[i]->style()->polish(m_box[i]); }
         if (on) for (const Check &ck : m_checks) if (ck.status == SEVS[i])
             items << QString("<tr><td style='padding-right:6px'><span style='color:%1;font-weight:bold'>%2</span></td><td>%3</td></tr>").arg(c.name(), sevTag(ck.status), esc(ck.text));
     }
@@ -102,27 +113,74 @@ QString ChecksBar::sheetHtml(const std::vector<Check> &checks)
     QString h = "<p><b>Checks:</b> " + esc(summaryText(checks)) + "</p>";
     QStringList bad;
     for (const char *s : {"fail", "warn"}) for (const Check &c : checks) if (c.status == s)
-        bad << QString("<li><b style='color:%1'>%2</b> %3</li>").arg(sevColor(s).name(), sevTag(s), esc(c.text));
+        bad << QString("<li><b style='color:%1'>%2</b> %3</li>").arg(sevPrintColor(s).name(), sevTag(s), esc(c.text));
     return h + (bad.isEmpty() ? "<p>No FAIL or CHECK items.</p>" : "<ul>" + bad.join("") + "</ul>");
 }
 
 /* ------------------------------------------------------------------ Rollup */
 Rollup::Rollup(const QString &key, const QString &title, QWidget *body, QWidget *parent) : QWidget(parent), m_key(key), m_body(body)
 {
-    QVBoxLayout *v = new QVBoxLayout(this); v->setContentsMargins(0, 2, 0, 2); v->setSpacing(2);
-    QHBoxLayout *h = new QHBoxLayout; h->setSpacing(6);
-    m_btn = new QToolButton; m_btn->setText(QString(title).replace("&", "&&")); m_btn->setCheckable(true); m_btn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); m_btn->setAutoRaise(true);
-    m_btn->setStyleSheet("QToolButton{font-weight:bold;}");
-    m_sum = new QLabel; m_sum->setTextFormat(Qt::RichText); m_sum->setWordWrap(true);
+    QVBoxLayout *v = new QVBoxLayout(this); v->setContentsMargins(0, 2, 0, 2); v->setSpacing(4);
+    m_head = new QFrame; m_head->setObjectName("ke9esuRollHead"); m_head->setCursor(Qt::PointingHandCursor);
+    QHBoxLayout *h = new QHBoxLayout(m_head); h->setContentsMargins(4, 2, 8, 2); h->setSpacing(8);
+    m_btn = new QToolButton; m_btn->setObjectName("ke9esuRoll"); m_btn->setText(QString(title).replace("&", "&&")); m_btn->setCheckable(true);
+    m_btn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); m_btn->setAutoRaise(true);
+    m_sum = new QLabel; m_sum->setObjectName("ke9esuRollSum"); m_sum->setTextFormat(Qt::RichText); m_sum->setWordWrap(true);
+    m_btn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred); // never elide the section title
+    m_btn->installEventFilter(this); fitTitle();
     h->addWidget(m_btn); h->addWidget(m_sum, 1);
-    v->addLayout(h); v->addWidget(body);
+    m_head->installEventFilter(this); m_sum->installEventFilter(this);
+    v->addWidget(m_head); v->addWidget(body);
     connect(m_btn, &QToolButton::toggled, this, [this](bool on) { m_body->setVisible(on); m_btn->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
         ke9esuSettings()->setValue("KE9ESU/tables/" + m_key + "/open", on); });
     setOpen(ke9esuSettings()->value("KE9ESU/tables/" + key + "/open", false).toBool());
 }
+void Rollup::fitTitle()
+{
+    QFont f = m_btn->font(); f.setBold(true);
+    m_btn->setMinimumWidth(QFontMetrics(f).horizontalAdvance(m_btn->text().replace("&&", "&")) + QFontMetrics(f).height() + 24);
+}
+bool Rollup::eventFilter(QObject *o, QEvent *e)
+{
+    if (o == m_btn && (e->type() == QEvent::FontChange || e->type() == QEvent::StyleChange || e->type() == QEvent::Polish)) fitTitle();
+    if ((o == m_head || o == m_sum) && e->type() == QEvent::MouseButtonRelease && static_cast<QMouseEvent *>(e)->button() == Qt::LeftButton) { m_btn->toggle(); return true; }
+    return QWidget::eventFilter(o, e);
+}
 void Rollup::setSummary(const QString &html) { m_sum->setText(html); }
 bool Rollup::isOpen() const { return m_btn->isChecked(); }
 void Rollup::setOpen(bool open) { m_btn->setChecked(open); m_body->setVisible(open); m_btn->setArrowType(open ? Qt::DownArrow : Qt::RightArrow); }
+
+
+/* ------------------------------------------------------------------ FlowLayout (wraps like CSS flex-wrap) */
+FlowLayout::FlowLayout(QWidget *parent, int hSpacing, int vSpacing) : QLayout(parent), m_h(hSpacing), m_v(vSpacing) { setContentsMargins(0, 0, 0, 0); }
+FlowLayout::~FlowLayout() { while (QLayoutItem *it = takeAt(0)) delete it; }
+void FlowLayout::addItem(QLayoutItem *item) { m_items << item; }
+int FlowLayout::count() const { return m_items.size(); }
+QLayoutItem *FlowLayout::itemAt(int i) const { return m_items.value(i); }
+QLayoutItem *FlowLayout::takeAt(int i) { return (i >= 0 && i < m_items.size()) ? m_items.takeAt(i) : nullptr; }
+Qt::Orientations FlowLayout::expandingDirections() const { return {}; }
+bool FlowLayout::hasHeightForWidth() const { return true; }
+int FlowLayout::heightForWidth(int w) const { return doLayout(QRect(0, 0, w, 0), true); }
+void FlowLayout::setGeometry(const QRect &r) { QLayout::setGeometry(r); doLayout(r, false); }
+QSize FlowLayout::sizeHint() const { return minimumSize(); }
+QSize FlowLayout::minimumSize() const
+{
+    QSize s; for (QLayoutItem *it : m_items) s = s.expandedTo(it->minimumSize());
+    QMargins m = contentsMargins(); return s + QSize(m.left() + m.right(), m.top() + m.bottom());
+}
+int FlowLayout::doLayout(const QRect &r, bool test) const
+{
+    QMargins m = contentsMargins(); QRect a = r.adjusted(m.left(), m.top(), -m.right(), -m.bottom());
+    int x = a.x(), y = a.y(), line = 0;
+    for (QLayoutItem *it : m_items) {
+        if (it->isEmpty()) continue;
+        QSize sh = it->sizeHint();
+        if (x + sh.width() > a.right() + 1 && line > 0) { x = a.x(); y += line + m_v; line = 0; }
+        if (!test) it->setGeometry(QRect(QPoint(x, y), sh));
+        x += sh.width() + m_h; line = qMax(line, sh.height());
+    }
+    return y + line - r.y() + m.bottom();
+}
 
 /* ------------------------------------------------------------------ Cards */
 Cards::Cards(int columns, QWidget *parent) : QWidget(parent), m_cols(columns)
@@ -134,12 +192,12 @@ void Cards::setCards(const QList<QPair<QString, QString>> &cards)
     while (QLayoutItem *it = m_grid->takeAt(0)) delete it;
     qDeleteAll(m_tiles); m_tiles.clear();
     for (int i = 0; i < cards.size(); i++) {
-        QFrame *fr = new QFrame(this); fr->setFrameShape(QFrame::StyledPanel); fr->setObjectName("ke9esuCard");
-        fr->setStyleSheet("#ke9esuCard{border:1px solid palette(mid);border-radius:6px;}");
-        QVBoxLayout *v = new QVBoxLayout(fr); v->setContentsMargins(8, 4, 8, 4); v->setSpacing(0);
-        QLabel *k = new QLabel(cards[i].first); QFont fk = k->font(); fk.setPointSizeF(fk.pointSizeF() * 0.85); k->setFont(fk); k->setStyleSheet("color:palette(dark);"); k->setWordWrap(true);
-        QLabel *val = new QLabel(cards[i].second); QFont fv = val->font(); fv.setBold(true); fv.setPointSizeF(fv.pointSizeF() * 1.1); val->setFont(fv);
-        val->setTextInteractionFlags(Qt::TextSelectableByMouse); val->setWordWrap(true);
+        QFrame *fr = new QFrame(this); fr->setObjectName("ke9esuCard");
+        QVBoxLayout *v = new QVBoxLayout(fr); v->setContentsMargins(10, 5, 10, 6); v->setSpacing(1);
+        // rich text with relative sizes, so A-/A+ (which resets every widget font) keeps the card hierarchy
+        QLabel *k = new QLabel("<span style='font-size:small'>" + esc(cards[i].first) + "</span>"); k->setObjectName("ke9esuCardKey"); k->setWordWrap(true);
+        QLabel *val = new QLabel("<span style='font-size:large;font-weight:600'>" + esc(cards[i].second).replace("\n", "<br>") + "</span>"); val->setObjectName("ke9esuCardVal");
+        val->setTextInteractionFlags(Qt::TextSelectableByMouse); val->setWordWrap(true); fr->setToolTip(cards[i].first + ": " + cards[i].second);
         v->addWidget(k); v->addWidget(val);
         m_tiles << fr;
     }
@@ -147,7 +205,9 @@ void Cards::setCards(const QList<QPair<QString, QString>> &cards)
 }
 void Cards::relayout()
 {
-    int cols = qBound(2, width() / 150, m_cols);
+    // tile width follows the text size, so A+ gives fewer, wider tiles instead of clipped values
+    int tile = qMax(130, fontMetrics().averageCharWidth() * 17);
+    int cols = qBound(1, width() / tile, m_cols);
     if (cols == m_used && m_grid->count() == m_tiles.size()) return;
     while (QLayoutItem *it = m_grid->takeAt(0)) delete it;
     for (int c = 0; c < m_cols; c++) m_grid->setColumnStretch(c, c < cols ? 1 : 0);
@@ -155,9 +215,11 @@ void Cards::relayout()
     m_used = cols;
 }
 void Cards::resizeEvent(QResizeEvent *e) { QWidget::resizeEvent(e); relayout(); }
+QSize Cards::minimumSizeHint() const { return QSize(qMax(130, fontMetrics().averageCharWidth() * 17), QWidget::minimumSizeHint().height()); }
+void Cards::changeEvent(QEvent *e) { QWidget::changeEvent(e); if (e->type() == QEvent::FontChange) { m_used = 0; relayout(); } }
 
 /* ------------------------------------------------------------------ FromMarker */
-FromMarker::FromMarker(QWidget *parent) : QLabel(parent) { setStyleSheet("color:#1f5fbf;font-style:italic;"); hide(); }
+FromMarker::FromMarker(QWidget *parent) : QLabel(parent) { setObjectName("ke9esuFrom"); hide(); }
 void FromMarker::setFrom(const QString &w) { m_from = w; setText(S("◂ from ") + w); setToolTip(tr("Value pulled in from the %1 window").arg(w)); setVisible(!w.isEmpty()); }
 void FromMarker::clear() { m_from.clear(); setText(QString()); hide(); }
 
@@ -322,6 +384,7 @@ Ke9esuDialog::Ke9esuDialog(const QString &window, QWidget *parent) : QDialog(par
     setWindowFlags(windowFlags() | Qt::WindowMinMaxButtonsHint);
     setModal(false);
     m_body = new QWidget;
+    connect(ThemeNotifier::instance(), &ThemeNotifier::changed, this, [this] { themeChanged(); });
 }
 void Ke9esuDialog::finishLayout(bool withAccept, const QString &acceptText)
 {
@@ -338,16 +401,53 @@ void Ke9esuDialog::finishLayout(bool withAccept, const QString &acceptText)
     sheet->setToolTip(tr("Printable build sheet: preview, print or save as PDF."));
     connect(sheet, &QPushButton::clicked, this, [this] { (new SheetDialog(sheetTitle(), sheetHtml(), sheetImages(), this))->show(); });
     h->addWidget(m_pull); h->addWidget(m_useIn); h->addWidget(sheet); h->addStretch();
+    auto tb = [&](const QString &t, const QString &tip, int code) { QToolButton *b = new QToolButton; b->setText(t); b->setToolTip(tip); b->setObjectName("ke9esuViewBtn");
+        connect(b, &QToolButton::clicked, this, [code] { ThemeNotifier::instance()->request(code); }); h->addWidget(b); };
+    tb(S("A−"), tr("Smaller text everywhere (Ctrl+−)"), -1); tb(S("A+"), tr("Larger text everywhere (Ctrl++)"), +1);
+    tb(S("◐"), tr("Switch between KE9ESU Light and KE9ESU Dark"), 2);
     if (withAccept) {
-        QPushButton *acc = new QPushButton(acceptText.isEmpty() ? tr("Accept → Coil64") : acceptText);
+        QPushButton *acc = new QPushButton(acceptText.isEmpty() ? tr("Accept → Coil64") : acceptText); acc->setObjectName("ke9esuPrimary");
         acc->setToolTip(tr("Send the result to the Coil64 main window (in its current units), switch to the matching calculator and close."));
         connect(acc, &QPushButton::clicked, this, [this] { acceptToCoil64(); close(); });
-        h->addWidget(acc);
+        m_acc = acc; h->addWidget(acc);
     }
     QPushButton *cl = new QPushButton(tr("Close")); connect(cl, &QPushButton::clicked, this, &QDialog::close); h->addWidget(cl);
     v->addLayout(h);
     QByteArray g = ke9esuSettings()->value("KE9ESU/geometry/" + m_window).toByteArray();
     if (!g.isEmpty()) restoreGeometry(g);
+    tameCombos();
+    connect(ThemeNotifier::instance(), &ThemeNotifier::changed, this, [this] { QTimer::singleShot(0, this, [this] { fitSplitters(); }); });
+}
+void Ke9esuDialog::tameCombos()
+{
+    // forms: wrap a field under its label when the pane is narrow (1024 px screens, large text)
+    for (QFormLayout *fl : findChildren<QFormLayout *>()) fl->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    // long preset / core / conductor names must not dictate the pane width: elide in the box, full text in the
+    // tooltip and in the (wider) popup list
+    for (QComboBox *c : findChildren<QComboBox *>()) {
+        if (c->property("ke9esuTamed").toBool()) continue;
+        c->setProperty("ke9esuTamed", true);
+        int longest = 0; for (int i = 0; i < c->count(); i++) longest = qMax(longest, c->itemText(i).size());
+        if (longest > 16 || c->property("ke9esuElide").toBool()) { c->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); c->setMinimumContentsLength(8); }
+        auto tip = [c] { c->setToolTip(c->currentText()); int w = 0; QFontMetrics fm(c->view()->font());
+            for (int i = 0; i < c->count(); i++) w = qMax(w, fm.horizontalAdvance(c->itemText(i)));
+            c->view()->setMinimumWidth(qMin(w + 40, 900)); };
+        connect(c, &QComboBox::currentTextChanged, c, tip); tip();
+        if (QAbstractItemModel *mdl = c->model()) { connect(mdl, &QAbstractItemModel::rowsInserted, c, tip); connect(mdl, &QAbstractItemModel::modelReset, c, tip); }
+    }
+}
+void Ke9esuDialog::fitSplitters()
+{
+    if (m_acc) { QFont bf = m_acc->font(); bf.setBold(true); m_acc->setMinimumWidth(QFontMetrics(bf).horizontalAdvance(m_acc->text()) + QFontMetrics(bf).height() * 2 + 12); }
+    // left input pane gets what its form needs (labels never truncated), capped at 55 % so results stay usable
+    for (QSplitter *sp : findChildren<QSplitter *>()) {
+        if (sp->orientation() != Qt::Horizontal || sp->count() < 2) continue;
+        QScrollArea *sa = qobject_cast<QScrollArea *>(sp->widget(0)); if (!sa || !sa->widget()) continue;
+        int total = 0; for (int x : sp->sizes()) total += x; if (total <= 0) total = sp->width();
+        int need = sa->widget()->sizeHint().width() + sa->verticalScrollBar()->sizeHint().width() + 2 * sa->frameWidth() + 4;
+        int left = qBound(260, need, int(total * 0.48));
+        sp->setSizes({left, qMax(200, total - left)});
+    }
 }
 void Ke9esuDialog::addPull(QMenu *m, const QString &key, const QString &text)
 {
@@ -363,6 +463,7 @@ void Ke9esuDialog::closeEvent(QCloseEvent *e)
     Project::instance()->setState(m_window, saveState());
     QDialog::closeEvent(e);
 }
-void Ke9esuDialog::showEvent(QShowEvent *e) { QDialog::showEvent(e); }
+void Ke9esuDialog::showEvent(QShowEvent *e) { QDialog::showEvent(e); tameCombos(); if (!m_fitted) { m_fitted = true; QTimer::singleShot(0, this, [this] { fitSplitters(); }); } }
+void Ke9esuDialog::resizeEvent(QResizeEvent *e) { QDialog::resizeEvent(e); }
 
 } // namespace ke9esu

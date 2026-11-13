@@ -62,5 +62,35 @@ long-wire problem bands → recommended transformer; needed C / L → standard-p
 session is restored automatically. Menu toggles: link core & wire live; share Coil64 results with the RF windows.
 
 Tests: `tests/ke9esu` (console target, also run in CI on Windows and Linux) — the designer's and combiner's own test
-suites ported to C++, plus golden diffs of 150 000+ values against the JavaScript originals (byte-identical texts).
+suites ported to C++, plus golden diffs of 150 000+ values against the JavaScript originals (byte-identical texts),
+plus theme / text-size settings tests (80 cases).
+
+## Look & feel (Milestone 2)
+Coil64 now follows the KE9ESU web app's look; the drawings follow Coil64.
+- **Themes** — *View → Theme* (also *Customize → Theme*): Coil64 Default / Sunny / Dark (unchanged) plus
+  **KE9ESU Light**, **KE9ESU Dark** and **KE9ESU System** (follows Windows' app light/dark setting, also while running).
+  The KE9ESU themes are one application-wide style sheet + palette (Fusion) with the web app's colours: cards, slim
+  inputs, accent Calculate / Accept buttons, accent tab marker, slim scrollbars. They apply to the main window, every
+  original Coil64 dialog and every RF window, live. An existing install that used Coil64 Default is moved to KE9ESU
+  System once; pick any theme afterwards and it is kept.
+- **Text size** — *View → A− / A+ / Reset* (Ctrl −, Ctrl +, Ctrl 0, anywhere in the app) and the A− / A+ buttons in
+  every RF window: 1 px steps (2 px above 20 px), 9…32 px, main and result text together. ◐ in an RF window toggles
+  KE9ESU Light / Dark. Theme and sizes are stored in Coil64's own settings (group `GUI`: `styleGUI`, `MainFontSize`,
+  `TextFontSize`), so Coil64's Options dialog shows the same values.
+- **RF windows** — result cards (key small, value large), FAIL / CHECK / NOTE / OK chips with the coloured left bar
+  (zero counts muted), roll-up header bars (click anywhere on the bar), coloured texts taken from the theme; build
+  sheets always print light.
+- **Drawings in Coil64's style** — shaded ferrite, 3-D wire tubes (yellow / orange / blue per winding, orange-red
+  leads), hatched core section with h, OD / ID dimension lines with arrowheads, italic serif labels: balun / unun
+  windings (incl. the 9:1 autotransformer's TAP), the coax choke, the coax trap (form, coax turns, D / l + equivalent
+  L ∥ C), the LC trap (air coil on Coil64's copper former or the toroid + trap circuit) and a long-wire sketch (unun,
+  counterpoise, wire with its length, suggested trap positions) plus the web app's avoid-zone chart. Drawings sit on
+  "paper" (white; light grey in dark themes) so they stay readable, and they are in the build sheets.
+- **Layout** — input panes are scroll areas in splitters sized to their forms; forms wrap a field under its label
+  when narrow; long preset / core / conductor names elide in the box with the full name as tooltip and in a wider
+  list; result cards reflow (1…4 per row) with the text size; checks chips wrap; original Coil64 dialogs grow to their
+  layout when the theme or text size needs more room. Checked at 1024 px wide and at large text.
+- **Long-wire analyzer** — the web app's full guidance is back: the k hint, the band-table caveat, "9:1 vs 49:1 for
+  this wire", the five counterpoise / choke / tuner / safety / measure reminders, the published-length cross-check,
+  and the avoid-zone chart.
 

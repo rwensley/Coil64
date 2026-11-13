@@ -17,6 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses
 
 #include "mainwindow.h"
 #include "ke9esu/ui/bridge.h"
+#include "ke9esu/ui/theme.h"
+#include "ke9esu/viewprefs.h"
 #include "ui_mainwindow.h"
 #include "resolve_q.h"
 
@@ -84,7 +86,7 @@ MainWindow::MainWindow(QWidget *parent) :
     myOpt->mainFontSize = settings->value("MainFontSize", QFontInfo(QFont()).pixelSize()).toInt();
     myOpt->textFontFamily = settings->value("TextFontFamily", QFontInfo(QFont()).family()).toString();
     myOpt->textFontSize = settings->value("TextFontSize", QFontInfo(QFont()).pixelSize()).toInt();
-    myOpt->styleGUI = settings->value("styleGUI",0).toInt();
+    myOpt->styleGUI = ke9esu::migrateStyle(*settings, settings->value("styleGUI", _Ke9esuSystem).toInt()); // KE9ESU: KE9ESU look by default
     myOpt->vTextColor = settings->value("valueTextColor", 0).toInt();
     myOpt->isEnglishLocale = settings->value( "isEnglishLocale", false ).toBool();
     myOpt->layoutPCBcoil = settings->value("layoutPCBcoil",true).toInt();
@@ -371,21 +373,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
     this->on_textBrowser_textChanged();
     on_tabWidget_currentChanged(tab);
-    switch (myOpt->styleGUI) {
-    case _DefaultStyle:
-        on_actionThemeDefault_triggered();
-        break;
-    case _DarkStyle:
-        on_actionThemeDark_triggered();
-        break;
-    case _SunnyStyle:
-        on_actionThemeSunny_triggered();
-        break;
-    default:
-        break;
-    }
-    if(myOpt->styleGUI == _DarkStyle)
-        invertGUIconColor();
+    applyGuiStyle(myOpt->styleGUI); // KE9ESU: one entry point for all six themes
     ke9esuBridge = new ke9esu::Bridge(this); // KE9ESU: RF transformers & traps menu, shared RF project, value links
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2283,58 +2271,24 @@ void MainWindow::on_actionTo_null_data_triggered()
     }
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void MainWindow::on_actionThemeDefault_triggered()
-{
-    qApp->setStyleSheet("");
-    mui->actionThemeSunny->setChecked(false);
-    mui->actionThemeDark->setChecked(false);
-    mui->actionThemeDefault->setChecked(true);
-    if(myOpt->styleGUI == _DarkStyle)
-        invertGUIconColor();
-    myOpt->styleGUI = _DefaultStyle;
-    resetUiFont();
-}
+void MainWindow::on_actionThemeDefault_triggered() { applyGuiStyle(_DefaultStyle); }
+void MainWindow::on_actionThemeDark_triggered() { applyGuiStyle(_DarkStyle); }
+void MainWindow::on_actionThemeSunny_triggered() { applyGuiStyle(_SunnyStyle); }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void MainWindow::on_actionThemeDark_triggered()
+// KE9ESU: apply any theme (Coil64 Default / Sunny / Dark, KE9ESU Light / Dark / System); icons are inverted exactly once per light<->dark change
+void MainWindow::applyGuiStyle(int style)
 {
-    // loadstylesheet
-    QFile qfDarkstyle(QStringLiteral(":/stylesheet/res/DarkStyle.qss"));
-    if (qfDarkstyle.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // set stylesheet
-        QString qsStylesheet = QString::fromLatin1(qfDarkstyle.readAll());
-        qApp->setStyleSheet(qsStylesheet);
-        qfDarkstyle.close();
-    }
-    //setStyleSheet(DARK_STYLE);
-    mui->actionThemeSunny->setChecked(false);
-    mui->actionThemeDark->setChecked(true);
-    mui->actionThemeDefault->setChecked(false);
-    if((myOpt->styleGUI == _DefaultStyle)||(myOpt->styleGUI == _SunnyStyle))
-        invertGUIconColor();
-    myOpt->styleGUI = _DarkStyle;
+    ke9esu::applyAppTheme(style);
+    mui->actionThemeDefault->setChecked(style == _DefaultStyle);
+    mui->actionThemeSunny->setChecked(style == _SunnyStyle);
+    mui->actionThemeDark->setChecked(style == _DarkStyle);
+    bool dark = isDarkStyle(style);
+    if (dark != iconsInverted) { invertGUIconColor(); iconsInverted = dark; }
+    myOpt->styleGUI = style;
     resetUiFont();
+    if (ke9esuBridge) ke9esuBridge->themeApplied();
 }
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void MainWindow::on_actionThemeSunny_triggered()
-{
-    // loadstylesheet
-    QFile qfSunnystyle(QStringLiteral(":/stylesheet/res/SunnyStyle.qss"));
-    if (qfSunnystyle.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // set stylesheet
-        QString qsStylesheet = QString::fromLatin1(qfSunnystyle.readAll());
-        qApp->setStyleSheet(qsStylesheet);
-        qfSunnystyle.close();
-    }
-    //setStyleSheet(SUNNY_STYLE);
-    mui->actionThemeSunny->setChecked(true);
-    mui->actionThemeDark->setChecked(false);
-    mui->actionThemeDefault->setChecked(false);
-    if(myOpt->styleGUI == _DarkStyle)
-        invertGUIconColor();
-    myOpt->styleGUI = _SunnyStyle;
-    resetUiFont();
-}
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////
 void MainWindow::on_actionClear_all_triggered()
 {
     if(!mui->textBrowser->document()->isEmpty()){
@@ -2943,19 +2897,7 @@ void MainWindow::getOptionStruct(_OptionStruct gOpt){
     emit sendOpt(*myOpt);
     int tab = mui->tabWidget->currentIndex();
     on_tabWidget_currentChanged(tab);
-    switch (myOpt->styleGUI) {
-    case _DefaultStyle:
-        on_actionThemeDefault_triggered();
-        break;
-    case _DarkStyle:
-        on_actionThemeDark_triggered();
-        break;
-    case _SunnyStyle:
-        on_actionThemeSunny_triggered();
-        break;
-    default:
-        break;
-    }
+    applyGuiStyle(myOpt->styleGUI); // KE9ESU
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void MainWindow::on_lineEdit_ind_editingFinished()

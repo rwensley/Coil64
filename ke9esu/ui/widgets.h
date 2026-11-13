@@ -6,6 +6,8 @@
 #define KE9ESU_WIDGETS_H
 
 #include <QDialog>
+#include <QLayout>
+#include <QPushButton>
 #include <QWidget>
 #include <QLabel>
 #include <QDoubleSpinBox>
@@ -24,6 +26,7 @@ class QVBoxLayout;
 class QGridLayout;
 class QHBoxLayout;
 class QMenu;
+class QFrame;
 #include <QSettings>
 
 namespace ke9esu {
@@ -32,12 +35,34 @@ QString f(double v, int d = 1);                // JS toFixed
 QString fmtOhm(double v);
 QString esc(const QString &s);
 QString sevTag(const QString &status);         // FAIL / CHECK / NOTE / OK
-QColor sevColor(const QString &status);
+QColor sevColor(const QString &status);         // active theme
+QColor sevPrintColor(const QString &status);    // light (paper) colours for build sheets
 void applyCoreUnits();                         // map Coil64 Preferences onto the core text units
 QSettings *ke9esuSettings();                   // Coil64's own settings file (portable aware), group "KE9ESU"
 
 /* Checks summary bar: one chip per severity with its count; ticking a chip lists that severity's items.
    Hidden by default; the choice is shared by every window and remembered (QSettings KE9ESU/checks/show_<sev>). */
+class FlowLayout : public QLayout
+{
+public:
+    explicit FlowLayout(QWidget *parent = nullptr, int hSpacing = 8, int vSpacing = 6);
+    ~FlowLayout() override;
+    void addItem(QLayoutItem *item) override;
+    int count() const override;
+    QLayoutItem *itemAt(int i) const override;
+    QLayoutItem *takeAt(int i) override;
+    Qt::Orientations expandingDirections() const override;
+    bool hasHeightForWidth() const override;
+    int heightForWidth(int w) const override;
+    void setGeometry(const QRect &r) override;
+    QSize sizeHint() const override;
+    QSize minimumSize() const override;
+private:
+    int doLayout(const QRect &r, bool test) const;
+    QList<QLayoutItem *> m_items;
+    int m_h, m_v;
+};
+
 class ChecksBar : public QWidget
 {
     Q_OBJECT
@@ -64,8 +89,12 @@ public:
     void setSummary(const QString &html);
     bool isOpen() const;
     void setOpen(bool open);
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override;   // the whole header bar toggles
+    void fitTitle();
 private:
     QString m_key;
+    QFrame *m_head;
     QToolButton *m_btn;
     QLabel *m_sum;
     QWidget *m_body;
@@ -79,7 +108,11 @@ public:
     explicit Cards(int columns = 4, QWidget *parent = nullptr);
     void setCards(const QList<QPair<QString, QString>> &cards);
 protected:
-    void resizeEvent(QResizeEvent *e) override;   // 2…columns tiles per row, whatever fits
+    void resizeEvent(QResizeEvent *e) override;   // 1…columns tiles per row, whatever fits
+    void changeEvent(QEvent *e) override;
+public:
+    QSize minimumSizeHint() const override;
+protected:
 private:
     void relayout();
     QGridLayout *m_grid;
@@ -168,11 +201,18 @@ class Ke9esuDialog : public QDialog
 public:
     Ke9esuDialog(const QString &window, QWidget *parent = nullptr);
     QString window() const { return m_window; }
+    QMap<QString, QImage> drawings() const { return sheetImages(); }   // build-sheet images (screenshot mode, tests)
     bool exportSheetPdf(const QString &path) const { return SheetDialog::savePdf(sheetHtml(), sheetImages(), path); }
     virtual QJsonObject saveState() const = 0;
     virtual void loadState(const QJsonObject &o) = 0;
     virtual void pullKey(const QString &key) { Q_UNUSED(key) }     // take a shared value (shows "from <window>")
 protected:
+    void tameCombos();
+    void fitSplitters();
+    void resizeEvent(QResizeEvent *e) override;
+    bool m_fitted = false;
+    QPushButton *m_acc = nullptr;
+
     QWidget *body() const { return m_body; }
     void finishLayout(bool withAccept, const QString &acceptText = QString());
     virtual void fillUseIn(QMenu *m) { Q_UNUSED(m) }
@@ -181,6 +221,7 @@ protected:
     virtual QString sheetHtml() const { return QString(); }
     virtual QMap<QString, QImage> sheetImages() const { return {}; }
     virtual void acceptToCoil64() {}
+    virtual void themeChanged() {}          // theme or text size changed: re-render rich text and drawings
     /* Pull menu entry for a shared key, enabled only if a value exists from another window. */
     void addPull(QMenu *m, const QString &key, const QString &text);
     void closeEvent(QCloseEvent *e) override;

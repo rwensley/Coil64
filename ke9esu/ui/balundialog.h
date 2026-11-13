@@ -20,6 +20,7 @@ public:
     void applyPreset(const QString &id, const QString &from = QString());
     const DesignResult &result() const { return m_d; }
 protected:
+    void themeChanged() override { recalc(); }
     void fillUseIn(QMenu *m) override;
     void fillPull(QMenu *m) override;
     QString sheetTitle() const override;

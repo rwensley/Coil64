@@ -174,7 +174,7 @@ void RF_Toroid::getOpt(_OptionStruct gOpt)
     ui->lineEdit_h->setText(roundTo(h / fOpt->dwLengthMultiplier, loc, fOpt->dwAccuracy));
     ui->lineEdit_c->setText(roundTo(c / fOpt->dwLengthMultiplier, loc, fOpt->dwAccuracy));
     ui->lineEdit_d->setText(roundTo(d / fOpt->dwLengthMultiplier, loc, fOpt->dwAccuracy));
-    if (fOpt->styleGUI == _DarkStyle)
+    if (isDarkStyle(fOpt->styleGUI))
         styleInfoColor = "<span style=\"color:yellow;\">";
     else
         styleInfoColor = "<span style=\"color:blue;\">";
@@ -186,7 +186,7 @@ void RF_Toroid::getOpt(_OptionStruct gOpt)
     ui->comboBox_2->setCurrentIndex(sizeInit);
     on_comboBox_2_currentIndexChanged(sizeInit);
     ui->toolButton_ltspice->setIconSize(QSize(fOpt->mainFontSize * 2, fOpt->mainFontSize * 2));
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton_calculate->setIcon(reverseIconColors(ui->pushButton_calculate->icon()));
         ui->pushButton_close->setIcon(reverseIconColors(ui->pushButton_close->icon()));
         ui->pushButton_help->setIcon(reverseIconColors(ui->pushButton_help->icon()));

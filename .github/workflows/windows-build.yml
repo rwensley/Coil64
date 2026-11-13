@@ -47,7 +47,7 @@ jobs:
           qmake ..\Coil64.pro CONFIG+=release CONFIG-=debug_and_release
           mingw32-make -j4
 
-      - name: Build and run the KE9ESU core tests (ported designer/combiner tests + golden diffs vs the JS)
+      - name: Build and run the KE9ESU tests (ported designer/combiner tests, golden diffs vs the JS, theme/text-size settings)
         shell: cmd
         run: |
           mkdir build-tests
@@ -91,7 +91,8 @@ jobs:
           Copy-Item LICENSE, README.md, README_KE9ESU.md "$env:PKG\"
           Copy-Item -Recurse docs "$env:PKG\docs"
           # Smoke test on a copy of the package (so no Coil64.ini / session state lands in the artifact):
-          # start the app, open every RF window, grab screenshots and build-sheet PDFs, quit
+          # start the app, open every RF window, grab screenshots and build-sheet PDFs, then the same in KE9ESU Light and
+          # KE9ESU Dark (shots\light, shots\dark) plus the build drawings (shots\drawings), quit
           Copy-Item -Recurse $env:PKG smoke
           # native 'windows' platform (the runner has a desktop session); 'offscreen' on Windows has no fonts
           $env:KE9ESU_SHOTS = (Join-Path (Get-Location) 'shots')
@@ -101,6 +102,13 @@ jobs:
           Get-ChildItem shots | Format-Table Name, Length
           if ((Get-ChildItem shots -Filter *.png).Count -lt 10) { throw "smoke run produced too few screenshots" }
           if ((Get-ChildItem shots -Filter *_sheet.pdf).Count -lt 6) { throw "smoke run produced too few build-sheet PDFs" }
+          # Milestone 2: every window again in KE9ESU Light and KE9ESU Dark (+ 1024 px and large-text passes, Coil64 dialogs)
+          foreach ($t in 'light','dark') {
+            $n = (Get-ChildItem "shots\$t" -Filter *.png -ErrorAction SilentlyContinue).Count
+            Write-Host "$t theme screenshots: $n"
+            if ($n -lt 14) { throw "smoke run produced too few $t-theme screenshots ($n)" }
+          }
+          if ((Get-ChildItem shots\drawings -Filter *.png -ErrorAction SilentlyContinue).Count -lt 6) { throw "smoke run produced too few build drawings" }
           if (Test-Path "$env:PKG\Coil64.ini") { throw "settings file leaked into the package" }
           Compress-Archive -Path "$env:PKG\*" -DestinationPath "$env:PKG.zip" -Force
           Get-ChildItem $env:PKG -Recurse -File | Format-Table FullName, Length -AutoSize
@@ -153,6 +161,8 @@ jobs:
           QT_QPA_PLATFORM=offscreen KE9ESU_SHOTS="$GITHUB_WORKSPACE/shots-linux" HOME="$RUNNER_TEMP/home" timeout 180 ./Coil64
           ls -la "$GITHUB_WORKSPACE/shots-linux"
           test "$(ls "$GITHUB_WORKSPACE"/shots-linux/*.png | wc -l)" -ge 10
+          test "$(ls "$GITHUB_WORKSPACE"/shots-linux/light/*.png | wc -l)" -ge 14
+          test "$(ls "$GITHUB_WORKSPACE"/shots-linux/dark/*.png | wc -l)" -ge 14
 
       - name: Upload Linux screenshots
         uses: actions/upload-artifact@v4

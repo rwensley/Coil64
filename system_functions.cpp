@@ -545,7 +545,7 @@ std::pair<QString, QString> getResistancePair(double value, QLocale loc, int pre
 QStringList getValueTextColorNames(int styleGUI)
 {
     QStringList colorNames =  (QStringList()<<"blue"<<"darkCyan"<<"red"<<"green"<<"black"<<"yellow"<<"cyan"<<"magenta"<<"gray");
-    if (styleGUI == _DarkStyle){
+    if (isDarkStyle(styleGUI)){
         colorNames.clear();
         colorNames <<"yellow"<<"cyan"<<"magenta"<<"gray"<<"white"<<"blue"<<"darkCyan"<<"red"<<"green";
     }

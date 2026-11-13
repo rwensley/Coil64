@@ -264,6 +264,8 @@ private:
     MThread_calculate *thread;
     QTimer *timer;
     ke9esu::Bridge *ke9esuBridge = nullptr; // KE9ESU
+    bool iconsInverted = false;             // KE9ESU: icons currently inverted for a dark theme
+    void applyGuiStyle(int style);          // KE9ESU: theme switch (all themes)
 };
 
 #endif // MAINWINDOW_H

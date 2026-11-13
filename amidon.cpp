@@ -390,13 +390,13 @@ void Amidon::getOpt(_OptionStruct gOpt)
     resize(size);
     move(pos);
     ui->lineEdit_ind->selectAll();
-    if (fOpt->styleGUI == _DarkStyle)
+    if (isDarkStyle(fOpt->styleGUI))
         styleInfoColor = "<span style=\"color:yellow;\">";
     else
         styleInfoColor = "<span style=\"color:blue;\">";
     delete settings;
     on_tabWidget_currentChanged(ui->tabWidget->currentIndex());
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton_export->setIcon(reverseIconColors(ui->pushButton_export->icon()));
         ui->pushButton_close->setIcon(reverseIconColors(ui->pushButton_close->icon()));
         ui->pushButton_help->setIcon(reverseIconColors(ui->pushButton_help->icon()));

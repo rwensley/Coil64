@@ -9,7 +9,7 @@
 #include <QMap>
 #include <QPointer>
 #include <QVariantMap>
-class MainWindow; class QAction; class QMenu;
+class MainWindow; class QAction; class QMenu; class QTimer;
 struct _OptionStruct;
 namespace ke9esu {
 class Ke9esuDialog;
@@ -22,6 +22,8 @@ public:
     void optionsChanged();                               // called when Coil64 Preferences change
     Ke9esuDialog *openWindow(const QString &name, const QString &pullKey = QString());
     static QStringList windowNames();
+    void themeApplied();                                  // MainWindow::applyGuiStyle() finished
+    void stepFont(int dir);                               // A- (dir -1), A+ (+1), reset (0)
     void screenshots(const QString &dir);                 // KE9ESU_SHOTS=<dir>
 private slots:
     void coil64Request(const QString &what, const QVariantMap &args);
@@ -37,6 +39,9 @@ private:
     MainWindow *m;
     QMap<QString, QPointer<Ke9esuDialog>> m_wins;
     QAction *m_live = nullptr, *m_capture = nullptr;
+    QList<QAction *> m_themeActs;
+    QTimer *m_sysPoll = nullptr; bool m_sysDark = false;
+    void buildViewMenu(QMenu *before);
     bool m_applying = false;
 };
 }

@@ -172,7 +172,7 @@ void Crossover::getOpt(_OptionStruct gOpt)
     ui->toolButton_Save->setIconSize(QSize(fOpt->mainFontSize * 2, fOpt->mainFontSize * 2));
     ui->toolButton_Clear->setIconSize(QSize(fOpt->mainFontSize * 2, fOpt->mainFontSize * 2));
     ui->pushButton_close->setIconSize(QSize(fOpt->mainFontSize * 2, fOpt->mainFontSize * 2));
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton_calculate->setIcon(reverseIconColors(ui->pushButton_calculate->icon()));
         ui->pushButton_close->setIcon(reverseIconColors(ui->pushButton_close->icon()));
         ui->toolButton_Help->setIcon(reverseIconColors(ui->toolButton_Help->icon()));

@@ -85,7 +85,7 @@ About::~About()
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void About::getStyleGUI(int styleGUI)
 {
-    if (styleGUI == _DarkStyle){
+    if (isDarkStyle(styleGUI)){
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         ui->label_27->setPixmap(reversePixmapColors(ui->label_27->pixmap()));
         ui->label_18->setPixmap(reversePixmapColors(ui->label_18->pixmap()));

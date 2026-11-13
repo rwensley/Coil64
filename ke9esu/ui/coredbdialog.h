@@ -17,6 +17,7 @@ public:
     void pullKey(const QString &key) override;
     QString selectedId() const;
 protected:
+    void themeChanged() override { fill(); }
     void fillUseIn(QMenu *m) override;
     void fillPull(QMenu *m) override;
     QString sheetHtml() const override;

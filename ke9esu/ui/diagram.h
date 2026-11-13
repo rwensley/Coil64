@@ -1,5 +1,5 @@
-/* diagram.h - KE9ESU fork of Coil64: winding diagram and impedance plot of a balun/unun/choke design (QPainter port of
-   the web app's SVG drawings; the Milestone 2 restyle will redraw them). Copyright (C) 2026 KE9ESU. GPL-3.0-or-later. */
+/* diagram.h - KE9ESU fork of Coil64: winding diagram and impedance plot of a balun/unun/choke design (redrawn in
+   Coil64's drawing style in Milestone 2; drawn on paper so they stay readable in dark themes). Copyright (C) 2026 KE9ESU. GPL-3.0-or-later. */
 #ifndef KE9ESU_DIAGRAM_H
 #define KE9ESU_DIAGRAM_H
 #include <QWidget>
@@ -8,7 +8,8 @@
 namespace ke9esu {
 void paintWinding(QPainter &p, const QRectF &r, const DesignResult &d);
 void paintImpedance(QPainter &p, const QRectF &r, const DesignResult &d);
-QImage renderWinding(const DesignResult &d, int w = 460, int h = 470);
+const int kWindW = 460, kWindH = 500;   // logical size of the winding drawing
+QImage renderWinding(const DesignResult &d, int w = kWindW, int h = kWindH);
 QImage renderImpedance(const DesignResult &d, int w = 900, int h = 360);
 
 class DesignView : public QWidget

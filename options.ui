@@ -773,6 +773,21 @@
               <string>Dark</string>
              </property>
             </item>
+            <item>
+             <property name="text">
+              <string>KE9ESU Light</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>KE9ESU Dark</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>KE9ESU System (follow Windows)</string>
+             </property>
+            </item>
            </widget>
           </item>
          </layout>

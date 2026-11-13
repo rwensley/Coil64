@@ -24,6 +24,12 @@
 #include "ke9esu_util.h"
 #include "project.h"
 #include <QTemporaryDir>
+#include <QApplication>
+#include <QSettings>
+#include <QPalette>
+#include "theme.h"
+#include "viewprefs.h"
+bool isDarkStyle(int styleGUI);   // ke9esu/ui/theme.cpp
 
 using namespace ke9esu;
 static int g_pass = 0, g_fail = 0;
@@ -571,14 +577,92 @@ static void projectTests()
     });
 }
 
+
+/* ---------------------------------------------------------------- Milestone 2: view preferences and themes */
+static double relLum(const QColor &c)
+{
+    auto ch = [](double v) { v /= 255.0; return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * ch(c.red()) + 0.7152 * ch(c.green()) + 0.0722 * ch(c.blue());
+}
+static double contrast(const QColor &a, const QColor &b) { double x = relLum(a), y = relLum(b); if (x < y) std::swap(x, y); return (x + 0.05) / (y + 0.05); }
+
+static void viewPrefsTests()
+{
+    t("view prefs: A-/A+ steps (1 px, 2 px from 20 px) and clamping 9..32 px", [] {
+        REQ1(stepFontPx(13, +1) == 14 && stepFontPx(14, -1) == 13 && stepFontPx(19, +1) == 20 && stepFontPx(20, +1) == 22 && stepFontPx(22, -1) == 20);
+        REQ1(stepFontPx(20, -1) == 19 && stepFontPx(kMaxFontPx, +1) == kMaxFontPx && stepFontPx(kMinFontPx, -1) == kMinFontPx);
+        REQ1(clampFontPx(3) == kMinFontPx && clampFontPx(99) == kMaxFontPx && clampFontPx(15) == 15);
+        int px = 13; for (int i = 0; i < 40; i++) px = stepFontPx(px, +1); REQ1(px == kMaxFontPx);
+        for (int i = 0; i < 40; i++) px = stepFontPx(px, -1); REQ1(px == kMinFontPx);
+    });
+    t("view prefs: theme + text sizes persist in Coil64's settings group GUI (ini round trip)", [] {
+        QTemporaryDir td; REQ1(td.isValid()); QString ini = td.path() + "/Coil64.ini";
+        { QSettings s(ini, QSettings::IniFormat); s.beginGroup("GUI"); saveViewPrefs(s, ViewPrefs{StyleKe9esuDark, 17, 15}); s.endGroup(); s.sync(); }
+        { QSettings s(ini, QSettings::IniFormat); s.beginGroup("GUI"); ViewPrefs p = loadViewPrefs(s, 13);
+          REQ1(p.style == StyleKe9esuDark && p.mainPx == 17 && p.textPx == 15);
+          REQ1(s.value("styleGUI").toInt() == 4 && s.value("MainFontSize").toInt() == 17 && s.value("TextFontSize").toInt() == 15); }
+        { QSettings s(ini, QSettings::IniFormat); s.beginGroup("GUI"); saveViewPrefs(s, ViewPrefs{42, 2, 99}); s.endGroup(); s.sync(); }
+        { QSettings s(ini, QSettings::IniFormat); s.beginGroup("GUI"); ViewPrefs p = loadViewPrefs(s, 13);
+          REQ1(p.style == StyleKe9esuSystem && p.mainPx == kMinFontPx && p.textPx == kMaxFontPx); }
+        { QSettings s(td.path() + "/empty.ini", QSettings::IniFormat); s.beginGroup("GUI"); ViewPrefs p = loadViewPrefs(s, 12);
+          REQ1(p.style == StyleKe9esuSystem && p.mainPx == 12 && p.textPx == 12); }
+    });
+    t("view prefs: Coil64 Default moves to KE9ESU System once; a later choice of Default is kept", [] {
+        QTemporaryDir td; QSettings s(td.path() + "/m.ini", QSettings::IniFormat); s.beginGroup("GUI");
+        REQ1(migrateStyle(s, StyleCoil64Default) == StyleKe9esuSystem && s.value("ke9esuThemeMigrated").toBool());
+        REQ1(migrateStyle(s, StyleCoil64Default) == StyleCoil64Default);
+        REQ1(migrateStyle(s, StyleCoil64Dark) == StyleCoil64Dark && migrateStyle(s, 77) == StyleKe9esuSystem);
+        QSettings s2(td.path() + "/m2.ini", QSettings::IniFormat); s2.beginGroup("GUI");
+        REQ1(migrateStyle(s2, StyleCoil64Sunny) == StyleCoil64Sunny && s2.value("ke9esuThemeMigrated").toBool());
+    });
+    t("theme: KE9ESU colours equal the web app's CSS variables (light and dark)", [] {
+        ThemeColors l = lightColors(), d = darkColors();
+        QStringList lw = {"#f5f6f8", "#ffffff", "#16202b", "#5a6675", "#d5dbe3", "#0b5cad", "#1d7a33", "#a86400", "#b3261e", "#2b5f9e", "#e3e7ec"};
+        QStringList dw = {"#12161c", "#1b2129", "#e6ebf1", "#9aa7b6", "#34404e", "#5aa9ff", "#5cc878", "#f0b04a", "#ff7a70", "#7fb3ff", "#2a333e"};
+        auto names = [](const ThemeColors &c) { return QStringList{c.bg.name(), c.panel.name(), c.ink.name(), c.muted.name(), c.line.name(), c.accent.name(), c.ok.name(), c.warn.name(), c.fail.name(), c.info.name(), c.grid.name()}; };
+        REQ(names(l) == lw, names(l).join(" ")); REQ(names(d) == dw, names(d).join(" ")); REQ1(!l.dark && d.dark);
+    });
+    t("theme: readable contrast (ink >= 7:1, muted >= 3.5:1, severities >= 3:1, drawings black on paper)", [] {
+        for (const ThemeColors &c : {lightColors(), darkColors()}) {
+            REQ(contrast(c.ink, c.bg) >= 7 && contrast(c.ink, c.panel) >= 7, c.ink.name());
+            REQ(contrast(c.muted, c.bg) >= 3.5 && contrast(c.muted, c.panel) >= 3.5, c.muted.name());
+            for (const QColor &s : {c.ok, c.warn, c.fail, c.info, c.accent}) REQ(contrast(s, c.panel) >= 3, s.name() + " on " + c.panel.name());
+            REQ1(contrast(c.paperInk, c.paper) >= 12);
+        }
+    });
+    t("theme: style sheets are fully expanded (no @placeholders) and style the RF widgets", [] {
+        for (const ThemeColors &c : {lightColors(), darkColors()}) {
+            QString q = themeQss(c), w = ke9esuWidgetsQss(c);
+            REQ(!q.contains(QRegularExpression("@[a-z]")), q.mid(q.indexOf('@') - 40, 80));
+            REQ(!w.contains(QRegularExpression("@[a-z]")), w.mid(w.indexOf('@') - 40, 80));
+            REQ1(q.contains("#ke9esuCard") && q.contains("ke9esuSev") && q.contains("#ke9esuRollHead") && q.contains(c.accent.name()));
+        }
+    });
+    t("theme: applying KE9ESU Light / Dark / System sets palette, style sheet and dark flag", [] {
+        int changed = 0; QObject ctx; QObject::connect(ThemeNotifier::instance(), &ThemeNotifier::changed, &ctx, [&] { changed++; });
+        applyAppTheme(StyleKe9esuLight);
+        REQ1(!themeIsDark() && qApp->palette().color(QPalette::Window) == lightColors().bg && qApp->styleSheet().contains(lightColors().accent.name()));
+        applyAppTheme(StyleKe9esuDark);
+        REQ1(themeIsDark() && qApp->palette().color(QPalette::Window) == darkColors().bg && qApp->palette().color(QPalette::WindowText) == darkColors().ink);
+        qputenv("KE9ESU_SYSTEM_THEME", "dark"); REQ1(isDarkStyle(StyleKe9esuSystem));
+        applyAppTheme(StyleKe9esuSystem); REQ1(themeIsDark());
+        qputenv("KE9ESU_SYSTEM_THEME", "light"); REQ1(!isDarkStyle(StyleKe9esuSystem));
+        applyAppTheme(StyleKe9esuSystem); REQ1(!themeIsDark());
+        qunsetenv("KE9ESU_SYSTEM_THEME");
+        REQ1(isDarkStyle(StyleCoil64Dark) && !isDarkStyle(StyleCoil64Sunny) && changed == 4);
+    });
+}
+
 int main(int argc, char **argv)
 {
-    QCoreApplication app(argc, argv);
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");   // theme tests need a QApplication, no display
+    QApplication app(argc, argv);
     QString err; if (!initData(&err)) { std::printf("FAIL initData: %s\n", err.toUtf8().constData()); return 1; }
     QString dir = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QString(KE9ESU_TEST_DIR);
     portedDesignerTests();
     portedCombinerTests();
     projectTests();
+    viewPrefsTests();
     goldenTests(dir);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("Failed: %s\n", g_failed.join("; ").toUtf8().constData());

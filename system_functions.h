@@ -78,8 +78,12 @@ inline QStringList splitByRegex(const QString &str, const QString &pattern) {
 enum _StyleGUI {
     _DefaultStyle,
     _SunnyStyle,
-    _DarkStyle
+    _DarkStyle,
+    _Ke9esuLight,   // KE9ESU fork: web-app look, light
+    _Ke9esuDark,    // KE9ESU fork: web-app look, dark
+    _Ke9esuSystem   // KE9ESU fork: follows the OS light/dark setting
 };
+bool isDarkStyle(int styleGUI); // KE9ESU fork: true for every dark theme (implemented in ke9esu/ui/theme.cpp)
 
 #pragma pack(push,1)
     struct _OptionStruct{

@@ -23,13 +23,14 @@ private:
     QComboBox *m_band, *m_place; QDoubleSpinBox *m_f; FromMarker *m_mark; bool m_internal = false;
 };
 
+class PaperView;
 class TrapTables : public QWidget   // checks, band reactance, steps, parts (shared by both trap windows)
 {
     Q_OBJECT
 public:
     TrapTables(const QString &prefix, QWidget *parent = nullptr);
     void set(const std::vector<Check> &checks, const std::vector<TrapBand> &bands, const QStringList &steps, const std::vector<Part> &parts);
-    Cards *cards; ChecksBar *checks;
+    Cards *cards; ChecksBar *checks; PaperView *drawing;
 private:
     QTableWidget *m_bands, *m_parts; QLabel *m_steps; Rollup *m_rb, *m_rs, *m_rp;
 };
@@ -43,10 +44,12 @@ public:
     void loadState(const QJsonObject &o) override;
     void pullKey(const QString &key) override;
 protected:
+    void themeChanged() override { recalc(); }
     void fillUseIn(QMenu *m) override;
     void fillPull(QMenu *m) override;
     QString sheetTitle() const override;
     QString sheetHtml() const override;
+    QMap<QString, QImage> sheetImages() const override;
     void acceptToCoil64() override;
 private slots:
     void recalc();
@@ -67,10 +70,12 @@ public:
     void loadState(const QJsonObject &o) override;
     void pullKey(const QString &key) override;
 protected:
+    void themeChanged() override { recalc(); }
     void fillUseIn(QMenu *m) override;
     void fillPull(QMenu *m) override;
     QString sheetTitle() const override;
     QString sheetHtml() const override;
+    QMap<QString, QImage> sheetImages() const override;
     void acceptToCoil64() override;
 private slots:
     void recalc();

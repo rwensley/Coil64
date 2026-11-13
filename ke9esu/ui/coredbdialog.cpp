@@ -1,5 +1,6 @@
 /* coredbdialog.cpp - see coredbdialog.h. Copyright (C) 2026 KE9ESU (Ron Wensley). GPL-3.0-or-later. */
 #include "coredbdialog.h"
+#include "theme.h"
 #include "coreui.h"
 #include "project.h"
 #include "balun_core.h"
@@ -47,9 +48,9 @@ CoreDbDialog::CoreDbDialog(QWidget *parent) : Ke9esuDialog(Win::CoreDb, parent)
     v->addWidget(m_t, 1);
     m_info = new QLabel; m_info->setWordWrap(true); m_info->setTextFormat(Qt::RichText); m_info->setOpenExternalLinks(true);
     v->addWidget(m_info);
-    QLabel *hint = new QLabel(S("<span style='color:gray'>* = computed from dimensions; ⚠ = Amidon AL far from geometry (suspect); ≠ = Coil64 and amidoncorp.com differ (the value closer to the geometric estimate is used). "
+    QLabel *hint = new QLabel(S("<span>* = computed from dimensions; ⚠ = Amidon AL far from geometry (suspect); ≠ = Coil64 and amidoncorp.com differ (the value closer to the geometric estimate is used). "
                                 "DB: FR Fair-Rite, MM Micrometals, Am Amidon. AL in nH/turn² everywhere; Amidon iron T cores µH/100 T (= 10 × nH/T²). Double-click Src to open the source page; "
-                                "double-click a core to use it in the Balun/Unun designer.</span>")); hint->setWordWrap(true);
+                                "double-click a core to use it in the Balun/Unun designer.</span>")); hint->setObjectName("ke9esuHint"); hint->setWordWrap(true);
     v->addWidget(hint);
     finishLayout(true, tr("Accept → Coil64 ferrite toroid"));
     resize(1240, 760);
@@ -109,7 +110,7 @@ void CoreDbDialog::fill()
         if (c.equiv.has) { QTableWidgetItem *e = put(CEq, jsNum(c.equiv.al), c.equiv.db + " " + c.equiv.id, true); if (std::fabs(c.equiv.al - c.al) > 0.05 * c.al) e->setForeground(sevColor("warn")); }
         put(CMag, cm("Ae", c.ae) + S(" · ") + cm("le", c.le) + S(" · ") + cm("Ve", c.ve), S("Ae cm² · le cm · Ve cm³"), true);
         put(CFreq, c.freq.isEmpty() ? M->freq : c.freq);
-        QTableWidgetItem *s = put(CSrc, S("↗"), c.src + S(" — ") + coreSourceUrl(c)); s->setForeground(QColor("#1f5fbf"));
+        QTableWidgetItem *s = put(CSrc, S("↗"), c.src + S(" — ") + coreSourceUrl(c)); s->setForeground(theme().accent);
         r++;
     }
     m_t->resizeRowsToContents();

@@ -19,6 +19,7 @@ public:
     void pullKey(const QString &key) override;
     void runSync();   // for tests / screenshots
 protected:
+    void themeChanged() override { showResults(); }
     void fillUseIn(QMenu *m) override;
     void fillPull(QMenu *m) override;
     QString sheetHtml() const override;

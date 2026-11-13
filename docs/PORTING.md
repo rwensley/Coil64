@@ -235,4 +235,50 @@ Known approximations / gaps
 - The long-wire guide text is condensed relative to the web app's prose; numbers and classifications are identical.
 - A Coil64 coil passed to the LC trap uses the nearest wire in the trap's coil-wire list (Coil64 allows any diameter).
 - Coil64 ferrite-toroid results map back to a database core only when the dimensions match a listed core.
-- Window styling (QSS/palette, A−/A+ font size, chip/card restyle) and the diagram redraw are Milestone 2.
+- Window styling (QSS/palette, A−/A+ font size, chip/card restyle) and the diagram redraw are Milestone 2 (done, below).
+  The long-wire guide text was restored to the web app's full wording in Milestone 2.
+
+## Implementation status — Milestone 2 (Nov 13, 2026): requirement #3, look & feel
+Files
+- `ke9esu/viewprefs.{h,cpp}` (QtCore, tested): style ids (0–2 Coil64 Default / Sunny / Dark, 3–5 KE9ESU Light / Dark /
+  System), text-size steps and clamping (9…32 px; 1 px, 2 px from 20 px), load / save in Coil64's `GUI` settings group,
+  one-time migration Default → KE9ESU System (`ke9esuThemeMigrated`).
+- `ke9esu/ui/theme.{h,cpp}`: `ThemeColors` = the web app's CSS variables (light and dark) + "paper" for drawings;
+  `themeQss()` (full KE9ESU sheet), `ke9esuWidgetsQss()` (RF widgets only, appended to Coil64's own three themes);
+  `applyAppTheme()` (Fusion + palette + sheet for KE9ESU themes; Coil64's original style / palette / sheet otherwise);
+  `systemPrefersDark()` (`KE9ESU_SYSTEM_THEME` override, Windows `AppsUseLightTheme`, else the start-up palette);
+  generated check / arrow images for styled indicators; `ThemeNotifier` (changed / requested); a layout guard that
+  grows Coil64 dialogs with fixed .ui minimum sizes to their layout's minimum on show and after theme / text changes;
+  `isDarkStyle()` used by every original dialog instead of `== _DarkStyle` (icon inversion, colours).
+- `ke9esu/ui/drawings.{h,cpp}`: Coil64-style drawing kit (`draw::tube`, `dim`, `hatched`, `ferriteRing`, `solenoid`,
+  `parallelLC`, italic serif labels) and `paintCoaxTrap`, `paintLcTrap`, `paintLongWire`, `paintZoneChart`,
+  `PaperView` (aspect-keeping widget on themed paper), `renderPaper()` (2×, white, for sheets). `diagram.cpp`'s winding
+  drawing was rewritten with the kit (460 × 500 logical).
+- Coil64 sources: `system_functions.h` (three enum values + `isDarkStyle`), `options.ui` (three theme entries),
+  `mainwindow.{h,cpp}` (`applyGuiStyle()` replaces both theme switch blocks; icon inversion tracked by `iconsInverted`),
+  21 dialogs (`isDarkStyle`). `bridge.cpp` builds the View menu (Theme submenu shared with Customize → Theme,
+  A− / A+ / Reset as application-wide QShortcuts), polls the OS theme every 4 s for KE9ESU System, saves the prefs
+  and answers the RF windows' A− / A+ / ◐ buttons.
+
+Screenshot mode (`KE9ESU_SHOTS=<dir>`) now also writes `light/` and `dark/` (main window: one-layer, ferrite toroid,
+LC result; every RF window; balun auto 9:1, choke, 1024 px and large-text passes; View and File menus; Coil64 Options
+and RF toroid dialogs) and `drawings/` (every build-sheet image). CI requires ≥ 14 PNGs per theme on Windows and Linux.
+
+Tests: 80 cases (73 + 7): A− / A+ steps and clamps; ini round trip of theme + both sizes; migration once; KE9ESU
+colours equal the web CSS; contrast (ink ≥ 7:1, muted ≥ 3.5:1, severities ≥ 3:1, drawing ink on paper ≥ 12:1);
+no unexpanded `@` placeholders; applying Light / Dark / System sets palette, sheet and dark flag. The test target now
+links QtGui / QtWidgets and runs on the offscreen platform.
+
+Recommendations (Milestone 2)
+- Keep the one-time move of Coil64 Default users to KE9ESU System (reversible from View → Theme); offer upstream
+  only the `isDarkStyle()` / `applyGuiStyle()` clean-up, which also fixes Coil64's double icon inversion when
+  switching Dark → Dark.
+- Coil64's own PNG pictures stay as they are (they already sit on paper in dark themes); a later pass could
+  re-render them as SVG for crisp scaling at large text.
+- Optional next steps: per-window remembered splitter positions; a "compact" density toggle; a Coil64 Options page for
+  the KE9ESU text sizes (today in View); translating the new strings (Coil64 ships .ts files).
+
+Known gaps (Milestone 2)
+- Coil64's original dialogs keep their own .ui layouts; they are themed and grown to fit, not re-laid-out as cards.
+- The Linux offscreen screenshots use DejaVu fonts; Windows uses Segoe UI / Times New Roman, so text widths differ.
+- At the largest sizes on a 1024 px screen some input panes need their horizontal scroll bar (nothing is cut off).

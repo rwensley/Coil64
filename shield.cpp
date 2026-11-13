@@ -107,7 +107,7 @@ void Shield::getOpt(_OptionStruct gOpt){
     ui->lineEdit_4->setText(roundTo(Hs / fOpt->dwLengthMultiplier, loc, fOpt->dwAccuracy));
     move(pos);
     delete settings;
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton->setIcon(reverseIconColors(ui->pushButton->icon()));
         ui->pushButton_2->setIcon(reverseIconColors(ui->pushButton_2->icon()));
         ui->pushButton_3->setIcon(reverseIconColors(ui->pushButton_3->icon()));

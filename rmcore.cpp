@@ -155,7 +155,7 @@ void RMcore::getOpt(_OptionStruct gOpt)
     ui->toolButton_saturation->setChecked(isShowSaturation);
     ui->toolButton_saturation->setIconSize(QSize(fOpt->mainFontSize * 2, fOpt->mainFontSize * 2));
     delete settings;
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton_calculate->setIcon(reverseIconColors(ui->pushButton_calculate->icon()));
         ui->pushButton_close->setIcon(reverseIconColors(ui->pushButton_close->icon()));
         ui->pushButton_help->setIcon(reverseIconColors(ui->pushButton_help->icon()));

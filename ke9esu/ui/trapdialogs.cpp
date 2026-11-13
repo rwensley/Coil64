@@ -4,6 +4,7 @@
 #include "project.h"
 #include "serialize.h"
 #include "ke9esu_util.h"
+#include "drawings.h"
 #include <QBoxLayout>
 #include <QFormLayout>
 #include <QComboBox>
@@ -50,13 +51,13 @@ void FreqPicker::setMhz(double v, const QString &from) { m_internal = true; m_f-
 TrapTables::TrapTables(const QString &prefix, QWidget *parent) : QWidget(parent)
 {
     QVBoxLayout *v = new QVBoxLayout(this); v->setContentsMargins(0, 0, 0, 0);
-    cards = new Cards(4); checks = new ChecksBar;
+    cards = new Cards(4); checks = new ChecksBar; drawing = new PaperView(720, 300);
     m_bands = tbl({"Band", "MHz", S("X (Ω)"), "Acts like", "Equivalent"}); m_parts = tbl({"Qty", "Item"});
     m_steps = new QLabel; m_steps->setWordWrap(true); m_steps->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_rb = new Rollup(prefix + "_bands", tr("Trap reactance on the other bands"), m_bands);
     m_rs = new Rollup(prefix + "_steps", tr("Build steps"), m_steps);
     m_rp = new Rollup(prefix + "_parts", tr("Parts"), m_parts);
-    v->addWidget(cards); v->addWidget(checks); v->addWidget(m_rb); v->addWidget(m_rs); v->addWidget(m_rp); v->addStretch(1);
+    v->addWidget(cards); v->addWidget(drawing); v->addWidget(checks); v->addWidget(m_rb); v->addWidget(m_rs); v->addWidget(m_rp); v->addStretch(1);
 }
 void TrapTables::set(const std::vector<Check> &ck, const std::vector<TrapBand> &bs, const QStringList &steps, const std::vector<Part> &parts)
 {
@@ -69,7 +70,7 @@ void TrapTables::set(const std::vector<Check> &ck, const std::vector<TrapBand> &
         for (int c = 0; c < 5; c++) { QTableWidgetItem *it = new QTableWidgetItem(v[c]); if (b.nearRes) it->setForeground(sevColor("fail")); m_bands->setItem(r, c, it); }
         if (b.nearRes) blk << b.band; else if (b.x > 0) ind++; else cap++;
     }
-    m_rb->setSummary(QString("%1 bands · <span style='color:%2'>blocks %3</span> · %4 inductive · %5 capacitive").arg(bs.size()).arg(sevColor("fail").name(), blk.isEmpty() ? "none" : blk.join(", ")).arg(ind).arg(cap));
+    m_rb->setSummary(QString("%1 bands · <span style='color:%2'>blocks %3</span> · %4 inductive · %5 capacitive").arg(bs.size()).arg(sevColor(blk.isEmpty() ? "ok" : "fail").name(), blk.isEmpty() ? "none" : blk.join(", ")).arg(ind).arg(cap));
     m_steps->setText(stepsHtml(steps)); m_rs->setSummary(QString("%1 steps").arg(steps.size()));
     m_parts->setRowCount((int)parts.size()); double q = 0;
     for (int r = 0; r < (int)parts.size(); r++) { m_parts->setItem(r, 0, new QTableWidgetItem(jsNum(parts[r].qty))); m_parts->setItem(r, 1, new QTableWidgetItem(parts[r].item)); q += parts[r].qty; }
@@ -86,6 +87,7 @@ static QString trapSheet(const QString &title, const QList<QPair<QString, QStrin
 {
     QString h = "<html><head>" + sheetCss() + "</head><body><h1>" + esc(S("KE9ESU build sheet — ") + title) + "</h1><div class='hint'>" + QDate::currentDate().toString(Qt::ISODate) + S(" · Coil64 KE9ESU · estimates only — confirm resonance with a dip meter / analyser before installing</div>");
     h += "<h2>Specification</h2><table class='t' cellspacing='0'>"; for (auto &r : rows) h += "<tr><th>" + esc(r.first) + "</th><td>" + esc(r.second) + "</td></tr>"; h += "</table>";
+    h += "<h2>Drawing</h2><img src='ke9esu://drawing' width='640'>";
     h += "<h2>Parts</h2>" + partsTableHtml(parts) + "<h2>Build steps</h2>" + stepsHtml(steps) + "<h2>Checks</h2>" + ChecksBar::sheetHtml(checks) + "<h2>Reactance on other bands</h2>" + bandsSheet(bs);
     return h + "</body></html>";
 }
@@ -95,7 +97,7 @@ CoaxTrapDialog::CoaxTrapDialog(QWidget *parent) : Ke9esuDialog(Win::Coax, parent
 {
     initData(); applyCoreUnits();
     QWidget *in = new QWidget; QFormLayout *fl = new QFormLayout(in);
-    m_f = new FreqPicker; m_req = new QLabel; m_req->setWordWrap(true); m_req->setStyleSheet("color:#1f5fbf;"); m_req->hide();
+    m_f = new FreqPicker; m_req = new QLabel; m_req->setWordWrap(true); m_req->setObjectName("ke9esuReq"); m_req->hide();
     m_coax = new QComboBox; for (const Coax &c : coaxList()) m_coax->addItem(c.label, c.id); m_coax->addItem(tr("Custom coax"), "custom");
     m_pf = dsp(5, 60, 30.8, 1, " pF/ft"); m_vf = dsp(0.5, 1, 0.66, 2); m_cOd = dsp(0.05, 1, 0.195, 3, " in"); m_z0 = dsp(25, 150, 50, 0, S(" Ω"));
     m_custom = new QWidget; QFormLayout *cf = new QFormLayout(m_custom); cf->setContentsMargins(0, 0, 0, 0);
@@ -164,6 +166,7 @@ void CoaxTrapDialog::recalc()
         {"X at resonance", rnd(r.X) + S(" Ω")}, {"Resonance check", f(r.fCheckMHz, 3) + " MHz"}, {"Stub-model estimate", f(r.fStubMHz, 3) + " MHz"},
         {"Q (est.) / Rp", rnd(r.q) + " / " + fmtOhm(r.rpOhm)}, {"Trap voltage", rnd(r.vTrap.rms) + " V RMS"}};
     m_t->cards->setCards(c);
+    m_t->drawing->setPainter([r](QPainter &p, const QRectF &rc) { paintCoaxTrap(p, rc, r); });
     m_t->set(r.checks, r.bands, r.steps, r.parts);
     Project::instance()->setState(window(), saveState());
     ke9esuSettings()->setValue("KE9ESU/state/" + window(), QJsonDocument(saveState()).toJson(QJsonDocument::Compact));
@@ -201,6 +204,8 @@ void CoaxTrapDialog::acceptToCoil64()
 }
 QJsonObject CoaxTrapDialog::saveState() const { QJsonObject o; o.insert("input", toJson(input())); return o; }
 void CoaxTrapDialog::loadState(const QJsonObject &o) { if (!o.isEmpty()) setInput(coaxInputFromJson(o.value("input").toObject())); }
+QMap<QString, QImage> CoaxTrapDialog::sheetImages() const { CoaxTrapResult r = m_r; return {{"drawing", renderPaper([r](QPainter &p, const QRectF &rc) { paintCoaxTrap(p, rc, r); }, 720, 300)}}; }
+QMap<QString, QImage> LcTrapDialog::sheetImages() const { LcTrapResult r = m_r; return {{"drawing", renderPaper([r](QPainter &p, const QRectF &rc) { paintLcTrap(p, rc, r); }, 720, 300)}}; }
 QString CoaxTrapDialog::sheetTitle() const { return "Coax trap " + f(m_r.input.fMHz, 3) + " MHz"; }
 QString CoaxTrapDialog::sheetHtml() const
 {
@@ -223,7 +228,7 @@ LcTrapDialog::LcTrapDialog(QWidget *parent) : Ke9esuDialog(Win::Lc, parent)
 {
     initData(); applyCoreUnits();
     QWidget *in = new QWidget; QFormLayout *fl = new QFormLayout(in);
-    m_f = new FreqPicker; m_req = new QLabel; m_req->setWordWrap(true); m_req->setStyleSheet("color:#1f5fbf;"); m_req->hide();
+    m_f = new FreqPicker; m_req = new QLabel; m_req->setWordWrap(true); m_req->setObjectName("ke9esuReq"); m_req->hide();
     m_mode = new QComboBox; m_mode->addItem(tr("Choose reactance X"), "X"); m_mode->addItem(tr("Choose inductance L"), "L"); m_mode->addItem(tr("Choose capacitance C"), "C");
     m_x = dsp(10, 2000, 200, 0, S(" Ω")); m_l = dsp(0.05, 500, 5, 3, S(" µH")); m_c = dsp(1, 20000, 100, 1, " pF");
     m_lMark = new FromMarker; m_cMark = new FromMarker;
@@ -234,7 +239,7 @@ LcTrapDialog::LcTrapDialog(QWidget *parent) : Ke9esuDialog(Win::Lc, parent)
     m_core = new CoreSelector; m_stack = new QSpinBox; m_stack->setRange(1, 4);
     m_cap = new QComboBox; for (const CapType &c : capTypes()) m_cap->addItem(c.label, c.id);
     m_lead = new LenSpin(0, 1000, 50);
-    m_coilNote = new QLabel; m_coilNote->setWordWrap(true); m_coilNote->setStyleSheet("color:#1f5fbf;"); m_coilNote->hide();
+    m_coilNote = new QLabel; m_coilNote->setWordWrap(true); m_coilNote->setObjectName("ke9esuReq"); m_coilNote->hide();
     m_proj = new ProjectBox(Win::Lc, ProjectBox::Power | ProjectBox::ZEnd | ProjectBox::Duty | ProjectBox::Ambient);
     fl->addRow(tr("Trap frequency"), m_f); fl->addRow(m_req);
     fl->addRow(tr("Design from"), m_mode); fl->addRow(tr("Reactance X"), m_x); fl->addRow(tr("Inductance L"), row({m_l, m_lMark})); fl->addRow(tr("Capacitance C"), row({m_c, m_cMark}));
@@ -322,6 +327,7 @@ void LcTrapDialog::recalc()
     c << qMakePair(QString("Q (est.) / Rp"), rnd(r.q) + " / " + fmtOhm(r.rpOhm)) << qMakePair(QString("Cap rating"), S("≥ ") + jsNum(r.capRatingV) + " V")
       << qMakePair(QString("Cap RF current"), f(r.capCurrentA, 2) + " A RMS") << qMakePair(QString("Trap voltage"), rnd(r.vTrap.rms) + " V RMS");
     m_t->cards->setCards(c);
+    m_t->drawing->setPainter([r = m_r](QPainter &p, const QRectF &rc) { paintLcTrap(p, rc, r); });
     m_t->set(r.checks, r.bands, r.steps, r.parts);
     Project::instance()->setState(window(), saveState());
     ke9esuSettings()->setValue("KE9ESU/state/" + window(), QJsonDocument(saveState()).toJson(QJsonDocument::Compact));

@@ -5,6 +5,7 @@
 #include "project.h"
 #include "serialize.h"
 #include "ke9esu_util.h"
+#include "theme.h"
 #include <QBoxLayout>
 #include <QFormLayout>
 #include <QComboBox>
@@ -53,7 +54,7 @@ BalunDialog::BalunDialog(QWidget *parent) : Ke9esuDialog(Win::Balun, parent)
     m_cond = new QComboBox; m_wireMark = new FromMarker;
     m_turns = new QSpinBox; m_turns->setRange(0, 60); m_turns->setSpecialValueText(tr("auto")); m_turns->setToolTip(tr("0 = automatic minimum for the XL / |Z| target"));
     m_fMin = dspin(0.1, 500, 1.8, 3, " MHz"); m_fMax = dspin(0.1, 500, 54, 3, " MHz");
-    m_bandsHint = new QLabel; m_bandsHint->setWordWrap(true); m_bandsHint->setStyleSheet("color:palette(dark);");
+    m_bandsHint = new QLabel; m_bandsHint->setWordWrap(true); m_bandsHint->setObjectName("ke9esuHint");
     m_xl = dspin(1, 20, 5, 1, S("× Z low"));
     m_target = dspin(100, 100000, 5000, 0, S(" Ω")); m_cm = dspin(0.1, 100, 10, 1, " %");
     m_cs = new QComboBox; m_cs->addItem(S("K9YC (1.3 pF)"), "k9yc"); m_cs->addItem("G3RBJ (geometry)", "g3rbj"); m_cs->addItem(tr("Manual"), "manual"); m_cs->addItem(tr("None"), "none");
@@ -80,7 +81,7 @@ BalunDialog::BalunDialog(QWidget *parent) : Ke9esuDialog(Win::Balun, parent)
     split->addWidget(sa);
     // ---- results
     QWidget *res = new QWidget; QVBoxLayout *rv = new QVBoxLayout(res);
-    m_title = new QLabel; QFont tf = m_title->font(); tf.setBold(true); tf.setPointSizeF(tf.pointSizeF() * 1.25); m_title->setFont(tf); m_title->setWordWrap(true);
+    m_title = new QLabel; m_title->setObjectName("ke9esuTitle"); m_title->setTextFormat(Qt::RichText); m_title->setWordWrap(true);
     m_hint = new QLabel; m_hint->setWordWrap(true);
     m_cards = new Cards(4); m_checks = new ChecksBar;
     m_capNote = new QLabel; m_capNote->setWordWrap(true);
@@ -235,7 +236,7 @@ void BalunDialog::recalc()
     m_bandsHint->setText(bl.isEmpty() ? tr("No amateur bands in this range.") : tr("Bands covered: ") + bl.join(", "));
     m_hint->setText(d.nMin ? S("Auto minimum: %1").arg(d.nMin) + (isChoke ? S(" turns for |Z| ≥ ") + fmtOhm(d.target) : S(" turns for XL ≥ ") + rnd(d.target) + S(" Ω")) + " at " + jsNum(inp.fMinMHz) + " MHz."
                            : S("Target not reachable within 60 turns on this core — choose a bigger core, more cores, or a higher-µ mix."));
-    m_title->setText(top.name + S(" — ") + d.core->id + (inp.stack > 1 ? S(" ×") + jsNum(inp.stack) : QString()) + (top.coreSets > 1 ? S(" (×2 lines)") : QString()));
+    m_title->setText("<span style='font-size:large;font-weight:600'>" + esc(top.name + S(" — ") + d.core->id + (inp.stack > 1 ? S(" ×") + jsNum(inp.stack) : QString()) + (top.coreSets > 1 ? S(" (×2 lines)") : QString())) + "</span>");
     QList<QPair<QString, QString>> cards;
     QString turnsTxt = top.turnsRatio ? QString("%1 : %2").arg(d.n1).arg(d.n2) : QString::number(d.n1) + (top.wires > 1 && !(isChoke && d.conductor->kind == "coax") ? (top.wires == 3 ? " trifilar" : " bifilar") : "");
     cards << qMakePair(QString("Turns"), turnsTxt);
@@ -269,7 +270,7 @@ void BalunDialog::recalc()
         zmin = std::min(zmin, p.z); zmax = std::max(zmax, p.z); if (p.lossPeakW > lmax) { lmax = p.lossPeakW; lf = p.fMHz; }
     }
     int ok = (int)d.perFreq.size() - hot - vhot, nb = (int)bandsInRange(inp.fMinMHz, inp.fMaxMHz).size();
-    auto pill = [](const QString &sev, const QString &t, int n) { return QString(" <span style='color:%1;%2'>[%3]</span>").arg(sevColor(sev).name(), n ? "font-weight:bold" : "color:#999", esc(t)); };
+    auto pill = [](const QString &sev, const QString &t, int n) { return QString(" <span style='color:%1;%2'>[%3]</span>").arg(sevColor(sev).name(), n ? "font-weight:bold" : "color:" + theme().muted.name(), esc(t)); };
     m_rPf->setSummary(QString("%1 frequencies, %2 bands · |Z| %3–%4 · worst key-down loss %5 W @ %6 MHz").arg(d.perFreq.size()).arg(nb).arg(esc(fmtOhm(zmin)), esc(fmtOhm(zmax)), f(lmax, 2), f(lf, 3))
                       + pill("fail", S("FAIL %1 (B > 2× limit)").arg(vhot), vhot) + pill("warn", QString("CHECK %1 (B > heating limit)").arg(hot), hot) + pill("ok", QString("OK %1").arg(ok), ok));
     m_parts->setRowCount((int)d.parts.size()); double q = 0;
@@ -333,7 +334,7 @@ void BalunDialog::acceptToCoil64()
 }
 
 QString BalunDialog::sheetTitle() const { return "KE9ESU " + m_d.topology.name + " " + m_d.core->id; }
-QMap<QString, QImage> BalunDialog::sheetImages() const { return {{"diagram", renderWinding(m_d, 460, 470)}, {"plot", renderImpedance(m_d, 900, 330)}}; }
+QMap<QString, QImage> BalunDialog::sheetImages() const { return {{"diagram", renderWinding(m_d)}, {"plot", renderImpedance(m_d, 900, 330)}}; }
 QString BalunDialog::sheetHtml() const
 {
     const DesignResult &d = m_d; const BalunInput &inp = d.input; const Core &c = *d.core;

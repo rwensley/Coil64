@@ -56,8 +56,8 @@ CombinerDialog::CombinerDialog(QWidget *parent) : Ke9esuDialog(Win::Combiner, pa
     m_t->verticalHeader()->hide(); m_t->setEditTriggers(QAbstractItemView::NoEditTriggers); m_t->setSelectionBehavior(QAbstractItemView::SelectRows); m_t->setSelectionMode(QAbstractItemView::SingleSelection);
     m_t->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents); m_t->horizontalHeader()->setStretchLastSection(true);
     v->addWidget(m_t, 1);
-    QLabel *hint = new QLabel(S("<span style='color:gray'>“+” = wired in series, “||” = wired in parallel (for capacitors series values add as 1/C). "
-                                "Leaf ranges: R 1 Ω–10 MΩ, C 1 pF–10 mF, L 1 nH–1 H. Meet-in-the-middle search over all 1…6-part networks.</span>")); hint->setWordWrap(true); v->addWidget(hint);
+    QLabel *hint = new QLabel(S("<span>“+” = wired in series, “||” = wired in parallel (for capacitors series values add as 1/C). "
+                                "Leaf ranges: R 1 Ω–10 MΩ, C 1 pF–10 mF, L 1 nH–1 H. Meet-in-the-middle search over all 1…6-part networks.</span>")); hint->setObjectName("ke9esuHint"); hint->setWordWrap(true); v->addWidget(hint);
     finishLayout(false);
     resize(980, 720);
     connect(m_run, &QPushButton::clicked, this, &CombinerDialog::run);
@@ -86,7 +86,7 @@ void CombinerDialog::run()
 {
     if (m_thread) { m_abort = true; return; }
     QString err; cc::Params p = params(&err);
-    if (!err.isEmpty()) { m_status->setText("<span style='color:#c62828'>" + esc(err) + "</span>"); return; }
+    if (!err.isEmpty()) { m_status->setText("<span style='color:" + sevColor("fail").name() + "'>" + esc(err) + "</span>"); return; }
     m_abort = false; m_run->setText(tr("Cancel")); m_prog->setValue(0); m_status->setText(tr("Searching…"));
     m_solType = p.type;
     m_thread = new FnThread([this, p] {
@@ -105,7 +105,7 @@ void CombinerDialog::runSync()
 void CombinerDialog::showResults()
 {
     QString unit = cc::partType(m_solType).unit;
-    if (!m_sol.error.isEmpty()) { m_status->setText(m_sol.error == "aborted" ? tr("Cancelled.") : "<span style='color:#c62828'>" + esc(m_sol.error) + "</span>"); m_t->setRowCount(0); return; }
+    if (!m_sol.error.isEmpty()) { m_status->setText(m_sol.error == "aborted" ? tr("Cancelled.") : "<span style='color:" + sevColor("fail").name() + "'>" + esc(m_sol.error) + "</span>"); m_t->setRowCount(0); return; }
     m_sorted = cc::sortResults(m_sol.results, m_sort->currentData().toString(), m_tol->value());
     m_t->setRowCount((int)m_sorted.size());
     for (int r = 0; r < (int)m_sorted.size(); r++) {

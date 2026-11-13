@@ -4,6 +4,7 @@
 #ifndef KE9ESU_EFLWDIALOG_H
 #define KE9ESU_EFLWDIALOG_H
 #include "widgets.h"
+#include "drawings.h"
 #include "eflw_core.h"
 class QDoubleSpinBox; class QComboBox; class QCheckBox; class QLabel; class QTableWidget; class QPushButton;
 namespace ke9esu {
@@ -15,8 +16,10 @@ public:
     QJsonObject saveState() const override;
     void loadState(const QJsonObject &o) override;
 protected:
+    void themeChanged() override { recalc(); }
     void fillUseIn(QMenu *m) override;
     QString sheetHtml() const override;
+    QMap<QString, QImage> sheetImages() const override;
     QString sheetTitle() const override;
 private slots:
     void recalc();
@@ -27,7 +30,9 @@ private:
     QComboBox *m_unit;
     QCheckBox *m_6m, *m_60m;
     ProjectBox *m_proj;
-    QLabel *m_summary, *m_good, *m_reco, *m_zonesLbl;
+    QLabel *m_summary, *m_good, *m_reco, *m_zonesLbl, *m_guide, *m_remind;
+    PaperView *m_sketch, *m_zoneChart;
+    LongWireInfo m_info; std::vector<AvoidZone> m_allZones; QStringList m_allBands; double m_zmn = 30, m_zmx = 300; std::vector<std::pair<double, double>> m_goodGaps;
     QPushButton *m_recoBtn;
     QTableWidget *m_table, *m_traps;
     Rollup *m_rTable, *m_rTraps, *m_rZones;

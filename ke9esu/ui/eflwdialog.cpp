@@ -4,6 +4,8 @@
 #include "trap_core.h"
 #include "balun_core.h"
 #include "ke9esu_util.h"
+#include "theme.h"
+#include <QGroupBox>
 #include <QBoxLayout>
 #include <QFormLayout>
 #include <QComboBox>
@@ -13,6 +15,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QScrollArea>
+#include <QSplitter>
 #include <QMenu>
 #include <QJsonDocument>
 #include <cmath>
@@ -39,9 +42,11 @@ EflwDialog::EflwDialog(QWidget *parent) : Ke9esuDialog(Win::Eflw, parent)
     m_tol = new QDoubleSpinBox; m_tol->setRange(0.01, 0.2); m_tol->setDecimals(2); m_tol->setSingleStep(0.01); m_tol->setValue(0.05); m_tol->setKeyboardTracking(false);
     m_min = new QDoubleSpinBox; m_min->setRange(10, 1000); m_min->setValue(30); m_min->setSuffix(" ft"); m_max = new QDoubleSpinBox; m_max->setRange(30, 2000); m_max->setValue(300); m_max->setSuffix(" ft");
     m_6m = new QCheckBox(tr("include 6 m")); m_60m = new QCheckBox(tr("include 60 m")); m_60m->setChecked(true);
-    fl->addRow(tr("Wire length"), lw); fl->addRow(tr("Velocity factor k"), m_k); fl->addRow(tr("Avoid-zone tolerance (± λ/2 fraction)"), m_tol);
-    QWidget *sw = new QWidget; QHBoxLayout *sh = new QHBoxLayout(sw); sh->setContentsMargins(0, 0, 0, 0); sh->addWidget(m_min); sh->addWidget(new QLabel(S("–"))); sh->addWidget(m_max); sh->addWidget(m_6m); sh->addWidget(m_60m); sh->addStretch();
-    fl->addRow(tr("Good-length search"), sw);
+    QLabel *kHint = new QLabel(S("Electrical half-wave ≈ 491.8·k ÷ f(MHz) ft. 0.95 is typical for bare/thin insulated wire at normal heights.")); kHint->setObjectName("ke9esuHint"); kHint->setWordWrap(true);
+    fl->addRow(tr("Wire length"), lw); fl->addRow(tr("Velocity factor k"), m_k); fl->addRow(QString(), kHint); fl->addRow(tr("Avoid-zone tolerance (± λ/2 fraction)"), m_tol);
+    QWidget *sw = new QWidget; QHBoxLayout *sh = new QHBoxLayout(sw); sh->setContentsMargins(0, 0, 0, 0); sh->addWidget(m_min); sh->addWidget(new QLabel(S("–"))); sh->addWidget(m_max); sh->addStretch();
+    fl->addRow(tr("Good-length search"), sw); fl->addRow(QString(), m_6m); fl->addRow(QString(), m_60m);
+    m_6m->setText(tr("include 6 m in the good-length search")); m_60m->setText(tr("include 60 m in the good-length search"));
     m_proj = new ProjectBox(Win::Eflw, ProjectBox::Power | ProjectBox::ZEnd); fl->addRow(m_proj);
 
     QWidget *res = new QWidget; QVBoxLayout *rv = new QVBoxLayout(res);
@@ -50,16 +55,24 @@ EflwDialog::EflwDialog(QWidget *parent) : Ke9esuDialog(Win::Eflw, parent)
     m_reco = new QLabel; m_reco->setWordWrap(true); m_recoBtn = new QPushButton; rgl->addWidget(m_reco); QHBoxLayout *rbh = new QHBoxLayout; rbh->addWidget(m_recoBtn); rbh->addStretch(); rgl->addLayout(rbh);
     m_table = mkTable({"Band", S("Length in λ"), "Impedance tendency", "9:1 + tuner", "49:1"});
     m_traps = mkTable({"Band", "Trap f (MHz)", "From feed point", "Suggestion", "", ""});
-    m_zonesLbl = new QLabel; m_zonesLbl->setWordWrap(true); m_good = new QLabel; m_good->setWordWrap(true);
-    QWidget *zw = new QWidget; QVBoxLayout *zv = new QVBoxLayout(zw); zv->setContentsMargins(0, 0, 0, 0); zv->addWidget(m_good); zv->addWidget(m_zonesLbl);
-    m_rTable = new Rollup("eflw_table", tr("Band-by-band"), m_table);
+    m_zonesLbl = new QLabel; m_zonesLbl->setWordWrap(true); m_zonesLbl->setObjectName("ke9esuMuted"); m_good = new QLabel; m_good->setWordWrap(true);
+    m_zoneChart = new PaperView(900, zoneChartHeight(int(bands().size())));
+    QWidget *zw = new QWidget; QVBoxLayout *zv = new QVBoxLayout(zw); zv->setContentsMargins(0, 0, 0, 0); zv->addWidget(m_zoneChart); zv->addWidget(m_good); zv->addWidget(m_zonesLbl);
+    QWidget *tw = new QWidget; QVBoxLayout *tv = new QVBoxLayout(tw); tv->setContentsMargins(0, 0, 0, 0); tv->addWidget(m_table);
+    QLabel *tHint = new QLabel(S("Impedance tendency is an approximation from the wire's length in half-waves. Height, slope, counterpoise, ground and nearby metal shift it a lot — confirm with an antenna analyser at the unun."));
+    tHint->setObjectName("ke9esuHint"); tHint->setWordWrap(true); tv->addWidget(tHint);
+    m_sketch = new PaperView(760, 300);
+    QGroupBox *gg = new QGroupBox(tr("9:1 vs 49:1 for this wire")); QVBoxLayout *ggl = new QVBoxLayout(gg); m_guide = new QLabel; m_guide->setWordWrap(true); m_guide->setTextFormat(Qt::RichText); ggl->addWidget(m_guide);
+    QGroupBox *rmg = new QGroupBox(tr("Counterpoise & choke reminders")); QVBoxLayout *rml = new QVBoxLayout(rmg); m_remind = new QLabel; m_remind->setWordWrap(true); m_remind->setTextFormat(Qt::RichText); rml->addWidget(m_remind);
+    m_rTable = new Rollup("eflw_table", tr("Band-by-band"), tw);
     m_rTraps = new Rollup("eflw_traps", tr("Trap suggestions (problem bands)"), m_traps);
-    m_rZones = new Rollup("eflw_zones", tr("Avoid zones and good lengths"), zw);
-    QLabel *rem = new QLabel(S("<i>Reminders: run a counterpoise (≈0.05 λ at the lowest band) or a feedline choke at the transformer; keep the wire clear of metal; "
-                               "classification uses ±8% around n·λ/2 (high Z) and odd λ/4 (low Z) at the band edges.</i>")); rem->setWordWrap(true);
-    rv->addWidget(m_summary); rv->addWidget(rg); rv->addWidget(m_rTable); rv->addWidget(m_rTraps); rv->addWidget(m_rZones); rv->addWidget(rem); rv->addStretch();
+    m_rZones = new Rollup("eflw_zones", tr("Lengths to avoid (9:1 unun) and good gaps"), zw);
+    rv->addWidget(m_summary); rv->addWidget(m_sketch); rv->addWidget(rg); rv->addWidget(m_rTable); rv->addWidget(m_rTraps); rv->addWidget(m_rZones); rv->addWidget(gg); rv->addWidget(rmg); rv->addStretch();
     QScrollArea *sa = new QScrollArea; sa->setWidget(res); sa->setWidgetResizable(true); sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    QVBoxLayout *bl = new QVBoxLayout(body()); bl->setContentsMargins(0, 0, 0, 0); bl->addWidget(in); bl->addWidget(sa, 1);
+    // web-app grid: inputs on the left, results on the right (splitter; left pane sized to its form)
+    QScrollArea *ia = new QScrollArea; ia->setWidget(in); ia->setWidgetResizable(true);
+    QSplitter *sp = new QSplitter(Qt::Horizontal); sp->addWidget(ia); sp->addWidget(sa); sp->setStretchFactor(1, 1); sp->setChildrenCollapsible(false);
+    QVBoxLayout *bl = new QVBoxLayout(body()); bl->setContentsMargins(0, 0, 0, 0); bl->addWidget(sp, 1);
     finishLayout(false);
     resize(1100, 860);
 
@@ -127,12 +140,40 @@ void EflwDialog::recalc()
     QString nearest = inGood ? jsNum(len) + " ft is inside a good gap for the selected bands."
         : jsNum(len) + " ft falls in the avoid zone for " + inZone.join(", ") + ". Nearest good gaps: " +
           (!std::isnan(below.first) ? "shorten to about " + f(std::min(below.second - 1, (below.first + below.second) / 2 + 1), 0) + " ft (" + f(below.first, 1) + S("–") + f(below.second, 1) + ")" : QString("none shorter")) +
-          (!std::isnan(above.first) ? "; or lengthen to about " + f((above.first + above.second) / 2, 0) + " ft (" + f(above.first, 1) + S("–") + f(above.second, 1) + ")" : "; no longer gap up to " + jsNum(mx) + " ft with these bands") + ".";
+          (!std::isnan(above.first) ? "; or lengthen to about " + f((above.first + above.second) / 2, 0) + " ft (" + f(above.first, 1) + S("–") + f(above.second, 1) + ")" : "; no longer gap up to " + jsNum(mx) + " ft with these bands (untick 60 m or widen the search to see more)") + ".";
     QStringList gl; for (auto &g : good) gl << f(g.first, 1) + S("–") + f(g.second, 1);
     QStringList bn; for (auto &b : bs) bn << b.id;
-    m_good->setText("<p>" + esc(nearest) + "</p><p><b>Good-length gaps " + jsNum(mn) + S("–") + jsNum(mx) + " ft</b> (" + bn.join(" ") + S(", ±") + rnd(m_tol->value() * 100) + "%): " + (good.empty() ? QString("none — relax the window or drop a band") : gl.join(", ") + " ft") + "</p>");
+    m_good->setText("<p>" + esc(nearest) + "</p><p><b>Good-length gaps " + jsNum(mn) + S("–") + jsNum(mx) + " ft</b> (" + bn.join(" ") + S(", ±") + rnd(m_tol->value() * 100) + "%): " + (good.empty() ? QString("none — relax the window or drop a band") : gl.join(", ") + " ft") + "</p>"
+                    + "<p><span style='color:" + theme().muted.name() + "'>" + esc(S("Cross-check: commonly published 9:1 random-wire lengths (e.g. 41, 53, 58, 71, 107 ft) fall inside these gaps. With 6 m included almost no gaps remain because 6 m half-waves are only ~9 ft long — treat 6 m as “tuner and hope”.")) + "</span></p>");
     QStringList zl; for (auto &z : zones) zl << QString("%1 %2·λ/2: %3–%4").arg(z.band).arg(z.n).arg(f(z.loFt, 1), f(z.hiFt, 1));
-    m_zonesLbl->setText("<span style='color:palette(dark)'>" + esc(S("Avoid zones (ft): ") + zl.join("; ")) + "</span>");
+    m_zonesLbl->setText(esc(S("Avoid zones (ft): ") + zl.join("; ")));
+    { EflwOpts all; all.k = k; all.tol = m_tol->value(); m_allZones = avoidZones(mx, all); m_allBands.clear(); for (const Band &b : bands()) m_allBands << b.id;
+      m_zmn = mn; m_zmx = mx; m_goodGaps = good;
+      auto zz = m_allZones; auto bb = m_allBands; auto gg2 = good; double l2 = len;
+      m_zoneChart->setPainter([zz, bb, mn, mx, l2, gg2](QPainter &p, const QRectF &r) { paintZoneChart(p, r, zz, bb, mn, mx, l2, gg2); }); }
+    // full web-app guidance: 9:1 vs 49:1 and reminders
+    {
+        double res80 = 491.8 * k / len; QStringList notHi; for (const EflwRow &e : m_rows) if (!e.kinds.contains("high")) notHi << e.band;
+        QStringList g;
+        g << S("<p><b>9:1 unun (≈450 Ω) + tuner</b> — the right choice for a <i>non-resonant</i> long wire used on many bands (160–6 m). It works best when the wire is <i>not</i> close to a half-wave multiple on any band you use. Sources: G3TXQ unun tests, ham.stackexchange 9:1 notes, DG1JAN UniBalun.</p>");
+        g << S("<p><b>49:1 / 64:1 EFHW transformer</b> — only for a wire that is ≈ λ/2 (or a multiple) on every band you use (≈2–5 kΩ). On other bands its input SWR is very high and the transformer and coax take the loss. G4AON and DG1JAN measured roughly 75–80% efficiency for FT240-43 EFHW transformers even when matched.</p>");
+        if (!hi.isEmpty()) g << S("<p><b>For %1 ft:</b> it is a half-wave at about <b>%2 MHz</b>%3, so on %4 the feed-point impedance is high (kΩ) — a 9:1 leaves a few hundred ohms and high voltage for the tuner, which most tuners can still match but with more loss. A 49:1 would suit %4 (near %2 MHz on 80 m) but not %5.</p>")
+                                    .arg(jsNum(len), f(res80, 2), res80 >= 3.5 && res80 <= 4.0 ? S(" (inside 80 m)") : QString(), hi.join(", "), notHi.join(", "));
+        g << S("<p><b>Recommendation:</b> keep the <b>9:1</b> for 160–6 m coverage with a tuner (Designer default: FT240-43 ×2, 4 trifilar turns PTFE wire, plus a #31 choke). If 80 m is hard to tune, trim or extend the wire into a good gap shown above rather than changing the transformer. On 160 m the wire is near λ/4 (low Z, ≈ 30–60 Ω): the 9:1 makes this ≈ 5 Ω, which tuners match only with loss — bypassing the unun on 160 m (direct feed against the counterpoise) is an option worth testing.</p>");
+        m_guide->setText(g.join(QString()));
+        double cp = 0.05 * 983.6 / 1.9;
+        QStringList rm = {
+            S("Counterpoise: the 9:1 needs something to push against. Use at least one wire of roughly 0.05 λ at your lowest band (≈ %1 ft for 160 m); several radials of different lengths (e.g. 17, 25, 33 ft) lying on the ground or just above it are better. A ground rod alone is a poor RF counterpoise.").arg(rnd(cp)),
+            S("Common-mode choke: without one, the coax shield becomes the counterpoise and RF comes into the shack. Put a 1:1 choke right at the unun’s 50 Ω side (Designer preset “KE9ESU: feedline choke” → 2.4″ #31 core with RG-400) and optionally a second at the shack entry. K9YC: aim for ≥ 5 kΩ, mostly resistive."),
+            S("Tuner: a 9:1 never gives 1:1 by itself — it brings the wire into range of the tuner. A remote tuner at the feedpoint keeps coax loss low; with the tuner in the shack, high SWR on long coax costs real power on 10/6 m."),
+            S("Safety & lightning: bond the station ground and the feedline entry ground per NEC; disconnect the antenna in storms. Expect ≈ 300–450 V RMS at the antenna terminal at 100 W — use PTFE wire and keep the end of the wire out of reach."),
+            S("Measure: the impedance classes on this page are estimates; sweep the wire with an analyser at the unun before buying parts for a different length.")};
+        QString ul = "<ul style='margin-left:-20px'>"; for (const QString &t : rm) ul += "<li>" + esc(t) + "</li>"; m_remind->setText(ul + "</ul>");
+        m_info.lengthFt = len; m_info.traps = m_sugg; m_info.counterpoiseFt = cp;
+        m_info.ratio = m_adv.presetId.contains("49") ? S("49:1") : m_adv.presetId.contains("64") ? S("64:1") : S("9:1");
+        const Preset *pr2 = presetById(m_adv.presetId); m_info.transformer = pr2 ? pr2->label : m_adv.topology;
+        LongWireInfo inf = m_info; m_sketch->setPainter([inf](QPainter &p, const QRectF &r) { paintLongWire(p, r, inf); });
+    }
     m_rZones->setSummary(inGood ? QString("<span style='color:%1'>%2 ft is in a good gap</span>").arg(sevColor("ok").name(), jsNum(len)) : QString("<span style='color:%1'>%2 ft is in an avoid zone (%3)</span>").arg(sevColor("warn").name(), jsNum(len), inZone.join(", ")));
     setWindowTitle(S("Long-wire analyzer (%1 ft) - KE9ESU").arg(jsNum(len)));
     Project::instance()->setState(window(), saveState());
@@ -176,16 +217,23 @@ void EflwDialog::loadState(const QJsonObject &o)
     m_internal = false; recalc();
 }
 
+QMap<QString, QImage> EflwDialog::sheetImages() const
+{
+    LongWireInfo inf = m_info; auto zz = m_allZones; auto bb = m_allBands; auto gg = m_goodGaps; double mn = m_zmn, mx = m_zmx, len = m_info.lengthFt;
+    return {{"sketch", renderPaper([inf](QPainter &p, const QRectF &r) { paintLongWire(p, r, inf); }, 760, 300)},
+            {"zones", renderPaper([=](QPainter &p, const QRectF &r) { paintZoneChart(p, r, zz, bb, mn, mx, len, gg); }, 900, zoneChartHeight(bb.size()))}};
+}
 QString EflwDialog::sheetTitle() const { return QString("KE9ESU long wire %1 ft").arg(jsNum(toFixedNum(lengthFt(), 2))); }
 QString EflwDialog::sheetHtml() const
 {
     QString h = "<html><head>" + sheetCss() + "</head><body><h1>" + esc(sheetTitle()) + "</h1>";
-    h += "<p>" + m_summary->text() + "</p><h2>Recommended transformer</h2><p>" + esc(m_adv.reason) + "</p>";
+    h += "<p>" + m_summary->text() + "</p><img src='ke9esu://sketch' width='640'><h2>Recommended transformer</h2><p>" + esc(m_adv.reason) + "</p>";
     h += "<h2>Band-by-band</h2><table class='t' cellspacing='0'><tr><th>Band</th><th>Length in λ</th><th>Impedance tendency</th><th>9:1 + tuner</th><th>49:1</th></tr>";
     for (const EflwRow &e : m_rows) h += "<tr><td><b>" + e.band + "</b></td><td class='n'>" + f(e.lambdaLo[0], 2) + S("–") + f(e.lambdaLo[1], 2) + "</td><td>" + esc(e.verdict) + "</td><td>" + esc(e.unun9) + "</td><td>" + esc(e.unun49) + "</td></tr>";
     h += "</table><h2>Trap suggestions</h2>";
     if (m_sugg.empty()) h += "<p>None needed.</p>"; else { h += "<ul>"; for (auto &t : m_sugg) h += "<li>" + esc(t.text) + "</li>"; h += "</ul>"; }
-    h += "<h2>Good lengths</h2>" + m_good->text() + "</body></html>";
+    h += "<h2>Good lengths</h2><img src='ke9esu://zones' width='640'>" + m_good->text() + "<h2>9:1 vs 49:1 for this wire</h2>" + m_guide->text()
+         + "<h2>Counterpoise &amp; choke reminders</h2>" + m_remind->text() + "</body></html>";
     return h;
 }
 

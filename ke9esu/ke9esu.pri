@@ -2,6 +2,6 @@
 # core database, standard-part combiner). GPL-3.0-or-later.
 INCLUDEPATH += $$PWD
 CONFIG += c++17
-HEADERS += $$PWD/ke9esu_util.h $$PWD/balun_core.h $$PWD/trap_core.h $$PWD/eflw_core.h $$PWD/combiner_core.h $$PWD/serialize.h
-SOURCES += $$PWD/ke9esu_util.cpp $$PWD/balun_core.cpp $$PWD/trap_core.cpp $$PWD/eflw_core.cpp $$PWD/combiner_core.cpp $$PWD/serialize.cpp
+HEADERS += $$PWD/ke9esu_util.h $$PWD/balun_core.h $$PWD/trap_core.h $$PWD/eflw_core.h $$PWD/combiner_core.h $$PWD/serialize.h $$PWD/viewprefs.h
+SOURCES += $$PWD/ke9esu_util.cpp $$PWD/balun_core.cpp $$PWD/trap_core.cpp $$PWD/eflw_core.cpp $$PWD/combiner_core.cpp $$PWD/serialize.cpp $$PWD/viewprefs.cpp
 RESOURCES += $$PWD/ke9esu.qrc

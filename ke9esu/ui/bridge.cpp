@@ -9,6 +9,16 @@
 #include "trapdialogs.h"
 #include "coredbdialog.h"
 #include "combinerdialog.h"
+#include "theme.h"
+#include <QShortcut>
+#include <memory>
+#include <QSet>
+#include "options.h"
+#include "rf_toroid.h"
+#include "viewprefs.h"
+#include <QActionGroup>
+#include <QFontDatabase>
+#include <QFontInfo>
 #include "balun_core.h"
 #include "trap_core.h"
 #include <QMenuBar>
@@ -67,6 +77,7 @@ Bridge::Bridge(MainWindow *mw) : QObject(mw), m(mw)
             "Results are engineering estimates. Verify with an analyzer before full power."));
     });
     m->mui->menuBar->insertMenu(m->mui->menuCustomize->menuAction(), rf);
+    buildViewMenu(rf);
 
     // ---- File menu: RF project
     QAction *before = m->mui->actionPrint;
@@ -92,6 +103,61 @@ Bridge::Bridge(MainWindow *mw) : QObject(mw), m(mw)
 }
 
 QStringList Bridge::windowNames() { return {Win::Balun, Win::Eflw, Win::Coax, Win::Lc, Win::CoreDb, Win::Combiner}; }
+
+void Bridge::buildViewMenu(QMenu *before)
+{
+    // Theme: Coil64's three actions + KE9ESU Light / Dark / System, one radio group, shared by View and Customize > Theme
+    QMenu *tm = m->mui->menuTheme; QActionGroup *g = new QActionGroup(this); g->setExclusive(true);
+    for (QAction *a : {m->mui->actionThemeDefault, m->mui->actionThemeSunny, m->mui->actionThemeDark}) { a->setCheckable(true); g->addAction(a); }
+    tm->addSeparator();
+    for (int s : {StyleKe9esuLight, StyleKe9esuDark, StyleKe9esuSystem}) {
+        QAction *a = tm->addAction(themeName(s)); a->setCheckable(true); a->setData(s); g->addAction(a); m_themeActs << a;
+        connect(a, &QAction::triggered, this, [this, s] { m->applyGuiStyle(s); });
+    }
+    QMenu *view = new QMenu(tr("&View"), m);
+    view->addMenu(tm);
+    view->addSeparator();
+    // shortcuts are separate QShortcuts and shown in the item text: with the KE9ESU style sheet Qt's shortcut column can
+    // overlap the text of menus created at run time
+    view->addAction(tr("A−  Smaller text      Ctrl −"), this, [this] { stepFont(-1); });
+    view->addAction(tr("A+  Larger text       Ctrl +"), this, [this] { stepFont(+1); });
+    view->addAction(tr("Reset text size       Ctrl 0"), this, [this] { stepFont(0); });
+    // one QShortcut per distinct sequence (ZoomOut is Ctrl+- on most platforms; duplicates would be ambiguous and never fire)
+    auto seen = std::make_shared<QSet<QString>>();
+    auto sc = [this, seen](const QKeySequence &k, int dir) { if (k.isEmpty() || seen->contains(k.toString())) return; seen->insert(k.toString());
+        QShortcut *s = new QShortcut(k, m); s->setContext(Qt::ApplicationShortcut);
+        connect(s, &QShortcut::activated, this, [this, dir] { stepFont(dir); }); };
+    sc(QKeySequence::ZoomOut, -1); sc(QKeySequence("Ctrl+-"), -1); sc(QKeySequence::ZoomIn, +1); sc(QKeySequence("Ctrl+="), +1); sc(QKeySequence("Ctrl++"), +1); sc(QKeySequence("Ctrl+0"), 0);
+    m->mui->menuBar->insertMenu(before->menuAction(), view);
+    // KE9ESU System follows the OS light/dark switch while running
+    m_sysDark = systemPrefersDark();
+    m_sysPoll = new QTimer(this); m_sysPoll->setInterval(4000);
+    connect(m_sysPoll, &QTimer::timeout, this, [this] { bool d = systemPrefersDark(); if (d != m_sysDark) { m_sysDark = d; if (m->myOpt->styleGUI == StyleKe9esuSystem) m->applyGuiStyle(StyleKe9esuSystem); } });
+    m_sysPoll->start();
+    connect(ThemeNotifier::instance(), &ThemeNotifier::requested, this, [this](int code) {
+        if (code == 2) m->applyGuiStyle(themeIsDark() ? StyleKe9esuLight : StyleKe9esuDark); else stepFont(code); });
+    themeApplied();
+}
+
+void Bridge::themeApplied()
+{
+    for (QAction *a : m_themeActs) a->setChecked(a->data().toInt() == m->myOpt->styleGUI);
+    QSettings *s = ke9esuSettings(); s->beginGroup("GUI");
+    ViewPrefs vp; vp.style = m->myOpt->styleGUI; vp.mainPx = m->myOpt->mainFontSize; vp.textPx = m->myOpt->textFontSize; saveViewPrefs(*s, vp);
+    s->endGroup();
+}
+
+void Bridge::stepFont(int dir)
+{
+    _OptionStruct *o = m->myOpt;
+    if (dir == 0) { int def = clampFontPx(QFontInfo(QFontDatabase::systemFont(QFontDatabase::GeneralFont)).pixelSize()); o->mainFontSize = def; o->textFontSize = def; }
+    else { o->mainFontSize = stepFontPx(o->mainFontSize, dir); o->textFontSize = stepFontPx(o->textFontSize, dir); }
+    m->resetUiFont();
+    emit m->sendOpt(*o);
+    themeApplied();
+    ThemeNotifier::instance()->notify();
+    status(tr("Text size %1 px (A−  Ctrl+−,  A+  Ctrl++,  reset Ctrl+0)").arg(o->mainFontSize));
+}
 
 Ke9esuDialog *Bridge::openWindow(const QString &name, const QString &pullKey)
 {
@@ -283,6 +349,8 @@ void Bridge::screenshots(const QString &dir)
         QString fn = QString("%1_%2").arg(i++, 2, 10, QChar('0')).arg(QString(w).replace(QRegularExpression("[^A-Za-z0-9]+"), "_"));
         grab(d, fn);
         if (!d->exportSheetPdf(dir + "/" + fn + "_sheet.pdf")) qWarning("KE9ESU shots: build sheet PDF failed for %s", qPrintable(w));
+        { const auto imgs = d->drawings(); if (!imgs.isEmpty()) QDir().mkpath(dir + "/drawings");
+          for (auto it = imgs.constBegin(); it != imgs.constEnd(); ++it) it.value().save(dir + "/drawings/" + fn + "_" + it.key() + ".png"); }
         d->close();
     }
     // linked flows
@@ -301,6 +369,40 @@ void Bridge::screenshots(const QString &dir)
       qInfo("KE9ESU shots: project save/open %s %s", ok ? "OK" : "FAILED", qPrintable(e)); }
     QMenu *rf = nullptr; for (QAction *a : m->mui->menuBar->actions()) if (a->menu() && a->text().contains("RF")) rf = a->menu();
     if (rf) { rf->popup(m->mapToGlobal(QPoint(40, 40))); QApplication::processEvents(); grab(rf, "32_menu"); rf->hide(); }
+    // ---- Milestone 2: every window in KE9ESU Light and KE9ESU Dark, a large-text pass and a 1024 px pass
+    int orig = m->myOpt->styleGUI;
+    for (int style : {int(StyleKe9esuLight), int(StyleKe9esuDark)}) {
+        QString sub = dir + (style == StyleKe9esuLight ? "/light" : "/dark"); QDir().mkpath(sub);
+        m->applyGuiStyle(style); QApplication::processEvents();
+        auto g2 = [&](QWidget *w, const QString &name) { for (int k = 0; k < 4; k++) QApplication::processEvents(); w->grab().save(sub + "/" + name + ".png"); };
+        m->mui->tabWidget->setCurrentIndex(0); refreshView(0, _Onelayer); g2(m, "00_main_one_layer");
+        refreshView(0, _FerrToroid); g2(m, "01_main_ferrite_toroid");
+        refreshView(2, -1); m->on_pushButton_Calculate_clicked(); g2(m, "02_main_lc_result");
+        int i2 = 10;
+        for (const QString &w : windowNames()) {
+            Ke9esuDialog *d = openWindow(w); d->resize(1280, 820);
+            if (CombinerDialog *c = qobject_cast<CombinerDialog *>(d)) c->runSync();
+            g2(d, QString("%1_%2").arg(i2++).arg(QString(w).replace(QRegularExpression("[^A-Za-z0-9]+"), "_")));
+            if (BalunDialog *bd = qobject_cast<BalunDialog *>(d)) {
+                bd->applyPreset("ke9esu-auto91"); g2(bd, "20_balun_auto91"); bd->applyPreset("ke9esu-choke"); g2(bd, "21_balun_choke"); bd->applyPreset("ke9esu");
+                bd->resize(1024, 700); g2(bd, "22_balun_1024px");
+                for (int k = 0; k < 4; k++) stepFont(+1);
+                bd->resize(1280, 820); g2(bd, "23_balun_large_text"); stepFont(0); bd->resize(1280, 820);
+            }
+            d->close();
+        }
+        // original Coil64 dialogs under the same theme
+        { Options *o = new Options(m); o->setAttribute(Qt::WA_DeleteOnClose, true);
+          connect(m, SIGNAL(sendOpt(_OptionStruct)), o, SLOT(getOpt(_OptionStruct))); emit m->sendOpt(*m->myOpt); o->show(); g2(o, "40_coil64_options"); o->close(); }
+        { RF_Toroid *t = new RF_Toroid(); t->setAttribute(Qt::WA_DeleteOnClose, true);
+          connect(m, SIGNAL(sendOpt(_OptionStruct)), t, SLOT(getOpt(_OptionStruct))); connect(m, SIGNAL(sendLocale(QLocale)), t, SLOT(getCurrentLocale(QLocale)));
+          emit m->sendLocale(m->loc); emit m->sendOpt(*m->myOpt); t->show(); g2(t, "41_coil64_rf_toroid"); t->close(); }
+        QMenu *view = nullptr; for (QAction *a : m->mui->menuBar->actions()) if (a->menu() && a->text().contains("View")) view = a->menu();
+        if (view) { view->popup(m->mapToGlobal(QPoint(60, 30))); QApplication::processEvents(); g2(view, "30_view_menu"); view->hide(); }
+        QMenu *file = m->mui->menuBar->actions().isEmpty() ? nullptr : m->mui->menuBar->actions().first()->menu();
+        if (file) { file->popup(m->mapToGlobal(QPoint(10, 30))); QApplication::processEvents(); g2(file, "31_file_menu"); file->hide(); }
+    }
+    m->applyGuiStyle(orig);
     qApp->quit();
 }
 

@@ -159,7 +159,7 @@ void Bandspread::getOpt(_OptionStruct gOpt)
     on_tabWidget_currentChanged(0);
     ui->lineEdit_flo->setFocus();
     ui->lineEdit_flo->selectAll();
-    if (fOpt->styleGUI == _DarkStyle){
+    if (isDarkStyle(fOpt->styleGUI)){
         ui->pushButton_calculate->setIcon(reverseIconColors(ui->pushButton_calculate->icon()));
         ui->pushButton_close->setIcon(reverseIconColors(ui->pushButton_close->icon()));
         ui->pushButton_help->setIcon(reverseIconColors(ui->pushButton_help->icon()));

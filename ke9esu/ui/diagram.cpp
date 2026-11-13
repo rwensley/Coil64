@@ -2,6 +2,8 @@
 #include "diagram.h"
 #include "widgets.h"
 #include "ke9esu_util.h"
+#include "drawings.h"
+#include "theme.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <cmath>
@@ -10,59 +12,70 @@ namespace ke9esu {
 
 void paintWinding(QPainter &p, const QRectF &rect, const DesignResult &d)
 {
-    p.save(); p.setRenderHint(QPainter::Antialiasing);
-    double sc = std::min(rect.width() / 460, rect.height() / 470);
-    p.translate(rect.topLeft()); p.scale(sc, sc);
-    QColor ink = p.pen().color();
-    const double cx = 230, cy = 225, Ro = 150, Ri = 82;
+    // Coil64 drawing style: shaded ferrite, 3-D wire tubes, orange-red leads, black dimension lines, italic serif labels
+    using namespace draw;
+    p.save(); p.setRenderHint(QPainter::Antialiasing); fit(p, rect, kWindW, kWindH);
+    const double cx = 230, cy = 222, Ro = 146, Ri = 80;
     const Topology &top = d.topology; bool isChoke = top.kind == "choke";
     bool coax = isChoke && d.conductor && d.conductor->kind == "coax";
     int N = top.turnsRatio ? d.n2 : d.n1, wires = coax ? 1 : top.wires;
-    const QColor cols[3] = {QColor("#d0342c"), QColor("#1f7a3a"), QColor("#1f5fbf")};
-    QPen ring(QColor(138, 143, 152, 115), Ro - Ri); p.setPen(ring); p.setBrush(Qt::NoBrush);
-    p.drawEllipse(QPointF(cx, cy), (Ro + Ri) / 2, (Ro + Ri) / 2);
-    p.setPen(QPen(Qt::gray, 1.5)); p.drawEllipse(QPointF(cx, cy), Ro, Ro); p.drawEllipse(QPointF(cx, cy), Ri, Ri);
+    const QColor cols[3] = {wireYellow(), wireOrange(), wireBlue()};
+    ferriteRing(p, QPointF(cx, cy), Ro, Ri);
     double a0 = -90 + 25, span = 310; std::vector<double> angles; bool aut = top.id == "auto91";
     if (top.turnsRatio && !aut) {
         double tight = std::min(span * 0.28, d.n1 * 9.0), rest = span - tight - 10;
         for (int i = 0; i < N; i++) angles.push_back(i < d.n1 ? a0 + (d.n1 > 1 ? i * tight / (d.n1 - 1) : 0) : a0 + tight + 10 + (N - d.n1 > 1 ? (i - d.n1) * rest / (N - d.n1 - 1) : rest));
     } else for (int j = 0; j < N; j++) angles.push_back(a0 + (N > 1 ? j * span / (N - 1) : span / 2));
     if (angles.empty()) { p.restore(); return; }
-    double dA = wires > 1 ? std::min(4.0, 120.0 / std::max(N, 1) / wires) : 0;
-    double sw = coax ? std::min(9.0, std::max(3.0, 260.0 / N)) : std::max(2.0, std::min(5.0, 160.0 / (N * wires)));
+    double dA = wires > 1 ? std::min(4.5, 120.0 / std::max(N, 1) / wires) : 0;
+    double sw = coax ? std::min(10.0, std::max(4.0, 260.0 / N)) : std::max(2.6, std::min(6.5, 170.0 / (N * wires)));
     auto pt = [&](double r, double deg) { double a = deg * PI / 180; return QPointF(cx + r * std::cos(a), cy + r * std::sin(a)); };
-    QFont fn = p.font(); fn.setPixelSize(13); p.setFont(fn);
+    auto colOf = [&](int t, int w) { return coax ? coaxJacket() : top.turnsRatio ? (t < d.n1 ? wireYellow() : wireOrange()) : cols[w % 3]; };
     for (int t = 0; t < (int)angles.size(); t++) {
-        for (int w = 0; w < wires; w++) {
-            double a = angles[t] + (w - (wires - 1) / 2.0) * dA;
-            QColor col = coax ? QColor("#444") : top.turnsRatio && t < d.n1 ? QColor("#d0342c") : top.turnsRatio ? QColor("#1f5fbf") : cols[w];
-            p.setPen(QPen(col, sw, Qt::SolidLine, Qt::RoundCap)); p.drawLine(pt(Ri - 10, a), pt(Ro + 10, a));
-        }
-        if (N <= 24 || (t + 1) % 5 == 0 || t == 0) { QPointF lp = pt(Ro + 24, angles[t]); p.setPen(ink); p.drawText(QRectF(lp.x() - 15, lp.y() - 9, 30, 18), Qt::AlignCenter, QString::number(t + 1)); }
+        for (int w = 0; w < wires; w++) { double a = angles[t] + (w - (wires - 1) / 2.0) * dA; tubeLine(p, pt(Ri - 9, a), pt(Ro + 9, a), sw, colOf(t, w)); }
+        if (N <= 24 || (t + 1) % 5 == 0 || t == 0) { QPointF lp = pt(Ro + 26, angles[t]); p.setPen(Qt::black); p.setFont(serif(14));
+            p.drawText(QRectF(lp.x() - 15, lp.y() - 9, 30, 18), Qt::AlignCenter, QString::number(t + 1)); }
     }
     auto lead = [&](double ang, const QString &txt, bool start) {
-        QPointF a = pt(Ro + 10, ang), b = pt(Ro + 55, ang); p.setPen(QPen(ink, 1.5, Qt::DashLine)); p.drawLine(a, b);
-        QFont bf = fn; bf.setPixelSize(14); bf.setBold(true); p.setFont(bf); p.setPen(ink);
-        p.drawText(QRectF(start ? b.x() : b.x() - 160, b.y() - 24, 160, 18), (start ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter, txt); p.setFont(fn);
+        double base = start ? angles.front() : angles.back();
+        for (int w = 0; w < wires; w++) { double a = base + (w - (wires - 1) / 2.0) * dA; tubeLine(p, pt(Ro + 9, a), pt(Ro + 46, ang + (w - (wires - 1) / 2.0) * 2.5), sw * 0.9, coax ? coaxJacket() : leadRed()); }
+        QPointF b = pt(Ro + 50, ang); p.setPen(Qt::black); p.setFont(serif(15, true));
+        p.drawText(QRectF(start ? b.x() + 2 : b.x() - 182, b.y() - 22, 180, 20), (start ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter, txt);
     };
-    lead(angles.front() - 9, aut ? S("START→GND") : "START", true);
-    lead(angles.back() + 9, aut ? S("END→ANT") : "END", false);
-    if (top.turnsRatio && d.n1 >= 1) {
-        double ta = (angles[d.n1 - 1] + angles[std::min(d.n1, N - 1)]) / 2; QPointF a = pt(Ri - 12, ta), b = pt(Ri - 48, ta);
-        p.setPen(QPen(ink, 2)); p.drawLine(a, b); QFont bf = fn; bf.setBold(true); bf.setPixelSize(14); p.setFont(bf);
-        p.drawText(QRectF(b.x() - 50, b.y() + 2, 100, 18), Qt::AlignCenter, QString("TAP @ %1").arg(d.n1)); p.setFont(fn);
+    lead(angles.front() - 7, aut ? S("START → GND") : S("START"), true);
+    lead(angles.back() + 7, aut ? S("END → ANT") : S("END"), false);
+    if (top.turnsRatio && d.n1 >= 1 && d.n1 < N) {
+        double ta = (angles[d.n1 - 1] + angles[d.n1]) / 2;
+        tubeLine(p, pt(Ri - 8, ta), pt(Ri - 40, ta), sw * 0.9, leadRed());
+        QPointF b = pt(Ri - 46, ta); p.setPen(Qt::black); p.setFont(serif(15, true));
+        p.drawText(QRectF(b.x() - 50, b.y() - 10, 100, 20), Qt::AlignCenter, aut ? S("TAP %1").arg(d.n1) : S("tap %1").arg(d.n1));
     }
-    QFont tf = fn; tf.setBold(true); tf.setPixelSize(15); p.setFont(tf); p.setPen(ink);
-    p.drawText(QRectF(cx - 80, cy - 24, 160, 20), Qt::AlignCenter, (d.core ? d.core->id : QString()) + (d.input.stack > 1 ? S(" ×") + jsNum(d.input.stack) : QString()));
-    p.setFont(fn); p.drawText(QRectF(cx - 80, cy + 2, 160, 18), Qt::AlignCenter, top.turnsRatio ? QString("%1 : %2 turns").arg(d.n1).arg(d.n2) : QString("%1 turns").arg(N));
+    // dimensions (true core size in the labels)
+    if (d.core) {
+        const Core &k = *d.core;
+        dim(p, QPointF(cx - Ro, cy), QPointF(cx + Ro, cy), Ro + 40, S("OD = %1 mm").arg(f(k.od, 1)), true);
+        double yI = Ri * 0.38, xI = std::sqrt(Ri * Ri - yI * yI);
+        dim(p, QPointF(cx - xI, cy + yI), QPointF(cx + xI, cy + yI), 0, S("ID = %1 mm").arg(f(k.idia, 1)));
+        // core section with height (stack drawn as stacked sections)
+        int st = std::max(1, std::min(3, int(std::lround(d.input.stack))));
+        double wmm = (k.od - k.idia) / 2, hmm = k.h * st, s = std::min(40.0 / std::max(wmm, 0.1), 64.0 / std::max(hmm, 0.1));
+        QRectF sec(380, 14, wmm * s, k.h * s);
+        for (int i = 0; i < st; i++) hatched(p, sec.translated(0, i * k.h * s));
+        dim(p, sec.topRight(), sec.topRight() + QPointF(0, hmm * s), -12, S("h"));
+        p.setPen(Qt::black); p.setFont(serif(12)); p.drawText(QRectF(340, 14 + hmm * s + 4, 118, 16), Qt::AlignCenter, S("h = %1 mm%2").arg(f(k.h, 1), st > 1 ? S(" ×") + QString::number(st) : QString()));
+    }
+    p.setPen(Qt::black); p.setFont(serif(16, true));
+    p.drawText(QRectF(0, kWindH - 58, kWindW, 20), Qt::AlignCenter, (d.core ? d.core->id : QString()) + (d.input.stack > 1 ? S(" ×") + jsNum(d.input.stack) : QString()) + S(" — ") +
+               (top.turnsRatio ? QString("%1 : %2 turns").arg(d.n1).arg(d.n2) : QString("%1 turn%2").arg(N).arg(N == 1 ? "" : "s")));
     QList<QPair<QColor, QString>> leg;
-    if (coax) leg << qMakePair(QColor("#444"), d.conductor->label);
-    else if (aut) { leg << qMakePair(QColor("#d0342c"), S("turns 1–%1 (tap → SO-239 centre)").arg(d.n1)) << qMakePair(QColor("#1f5fbf"), S("turns %1–%2 (even spacing)").arg(d.n1 + 1).arg(d.n2)); }
-    else if (top.turnsRatio) { leg << qMakePair(QColor("#d0342c"), S("primary turns 1–%1 (tight)").arg(d.n1)) << qMakePair(QColor("#1f5fbf"), S("turns %1–%2 (spread)").arg(d.n1 + 1).arg(d.n2)); }
+    if (coax) leg << qMakePair(coaxJacket(), d.conductor->label);
+    else if (aut) { leg << qMakePair(wireYellow(), S("turns 1–%1 (tap → SO-239 centre)").arg(d.n1)) << qMakePair(wireOrange(), S("turns %1–%2").arg(d.n1 + 1).arg(d.n2)); }
+    else if (top.turnsRatio) { leg << qMakePair(wireYellow(), S("primary 1–%1 (tight)").arg(d.n1)) << qMakePair(wireOrange(), S("turns %1–%2 (spread)").arg(d.n1 + 1).arg(d.n2)); }
     else { const char *names[3] = {"A", "B", "C"}; for (int w = 0; w < wires; w++) leg << qMakePair(cols[w], QString("wire ") + names[w]); }
-    double lx = 12, ly = 470 - 18;
-    for (auto &l : leg) { p.fillRect(QRectF(lx, ly - 11, 22, 6), l.first); p.setPen(ink); p.drawText(QPointF(lx + 28, ly), l.second); lx += 36 + p.fontMetrics().horizontalAdvance(l.second); }
-    if (top.coreSets > 1) p.drawText(QPointF(12, 20), "Make TWO identical windings, one per core set.");
+    p.setFont(serif(14)); double total = 0; for (auto &l : leg) total += 34 + 14 + p.fontMetrics().horizontalAdvance(l.second);
+    double lx = std::max(8.0, (kWindW - total) / 2), ly = kWindH - 18;
+    for (auto &l : leg) { tubeLine(p, QPointF(lx, ly - 5), QPointF(lx + 26, ly - 5), 5, l.first); p.setPen(Qt::black); p.drawText(QPointF(lx + 34, ly), l.second); lx += 48 + p.fontMetrics().horizontalAdvance(l.second); }
+    if (top.coreSets > 1) { p.setFont(serif(14, true)); p.drawText(QRectF(8, 8, 320, 36), Qt::TextWordWrap, "Make TWO identical windings, one per core set."); }
     p.restore();
 }
 
@@ -106,25 +119,28 @@ void paintImpedance(QPainter &p, const QRectF &rect, const DesignResult &d)
     p.restore();
 }
 
-QImage renderWinding(const DesignResult &d, int w, int h)
-{
-    QImage img(w * 2, h * 2, QImage::Format_ARGB32); img.fill(Qt::white); QPainter p(&img); p.setPen(Qt::black); p.scale(2, 2);
-    paintWinding(p, QRectF(0, 0, w, h), d); return img;
-}
+QImage renderWinding(const DesignResult &d, int w, int h) { return renderPaper([&](QPainter &p, const QRectF &r) { paintWinding(p, r, d); }, w, h); }
 QImage renderImpedance(const DesignResult &d, int w, int h)
 {
     QImage img(w * 2, h * 2, QImage::Format_ARGB32); img.fill(Qt::white); QPainter p(&img); p.setPen(Qt::black); p.scale(2, 2);
     paintImpedance(p, QRectF(0, 0, w, h), d); return img;
 }
 
-DesignView::DesignView(Kind k, QWidget *parent) : QWidget(parent), m_kind(k) { setMinimumSize(k == Winding ? QSize(300, 300) : QSize(500, 260)); }
-QSize DesignView::sizeHint() const { return m_kind == Winding ? QSize(420, 430) : QSize(760, 320); }
+DesignView::DesignView(Kind k, QWidget *parent) : QWidget(parent), m_kind(k)
+{
+    setObjectName("ke9esuDiagram"); setAttribute(Qt::WA_StyledBackground, true);
+    setMinimumSize(k == Winding ? QSize(300, 320) : QSize(420, 240));
+}
+QSize DesignView::sizeHint() const { return m_kind == Winding ? QSize(kWindW, kWindH) : QSize(760, 320); }
 void DesignView::paintEvent(QPaintEvent *)
 {
+    // drawings live on "paper" (white, light grey in dark themes) with black ink, like Coil64's own pictures
+    QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
+    const ThemeColors &c = theme(); p.setPen(QPen(c.line, 1)); p.setBrush(c.paper); p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
     if (!m_has || !m_d.core) return;
-    QPainter p(this); p.setPen(palette().color(QPalette::WindowText));
-    if (m_kind == Winding) { double s = std::min(width() / 460.0, height() / 470.0); paintWinding(p, QRectF((width() - 460 * s) / 2, 0, 460 * s, 470 * s), m_d); }
-    else paintImpedance(p, QRectF(0, 0, width(), height()), m_d);
+    p.setPen(c.paperInk);
+    if (m_kind == Winding) paintWinding(p, QRectF(rect()).adjusted(6, 6, -6, -6), m_d);
+    else paintImpedance(p, QRectF(rect()).adjusted(4, 4, -4, -4), m_d);
 }
 
 } // namespace ke9esu
